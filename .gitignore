@@ -1,0 +1,6 @@
+*.backup-*.strat
+*.editor.tmp
+*.log
+__pycache__/
+.pytest_cache/
+RewardEvidence/
