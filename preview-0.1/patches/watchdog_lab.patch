@@ -1,0 +1,173 @@
+--- a/submacros/watchdog.ahk
++++ b/submacros/watchdog_lab.ahk
+@@ -14,6 +14,7 @@
+ #Include "%A_LineFile%\..\..\lib\Gdip_All.ahk"
+ #Include "%A_LineFile%\..\..\lib\OCR.ahk"
+ #Include "%A_LineFile%\..\..\lib\Roblox.ahk"
++#Include "%A_LineFile%\..\..\lib\StrategyLab\RewardTrackerCore.ahk"
+ 
+ Opt := A_AppData "\Ultimate_Macro\Options"
+ SettingsFile := Opt "\Settings.tds"
+@@ -187,12 +188,12 @@
+ SendInfo(matchResult := "") {
+     global WebhookLink, StateFile, SendCurrenciesEnabled, WebhookEnabled, WebhookSepatateTriumphScreenshots, WebhookLink2
+ 
+-    if (!WebhookEnabled || WebhookLink = "") {
+-        return
+-    }
+-
+-    if (WebhookSepatateTriumphScreenshots = 1) {
++    shouldSendWebhook := (WebhookEnabled && WebhookLink != "")
++    originalWebhookLink := WebhookLink
++    usingSeparateWebhook := false
++    if (shouldSendWebhook && WebhookSepatateTriumphScreenshots = 1 && WebhookLink2 != "") {
+         WebhookLink := WebhookLink2
++        usingSeparateWebhook := true
+     }
+ 
+     mapName := "Unknown"
+@@ -200,6 +201,12 @@
+     coinVal := 0
+     gemVal := 0
+     expVal := 0
++    evidencePath := ""
++    knownItems := []
++    strategyPath := IniRead(StateFile, "State", "Strategy", "")
++    configuredMap := (strategyPath != "" && FileExist(strategyPath)) ? IniRead(strategyPath, "Settings", "map", "Unknown") : "Unknown"
++    modeName := (strategyPath != "" && FileExist(strategyPath)) ? IniRead(strategyPath, "Settings", "difficulty", "Unknown") : "Unknown"
++    runId := RewardTrackerMakeRunId(StateFile)
+ 
+     timeCompleted_T := IniRead(StateFile, "State", "TimeWhenStartedPlaying", "Failed")
+ 
+@@ -246,23 +253,26 @@
+         FoundX := Restart2.x
+         FoundY := Restart2.y
+     } else {
+-        pBitmap := Gdip_BitmapFromScreen()
+-        if (pBitmap) {
+-            headerTitle := (matchResult = "Triumph") ? "### :trophy: TRIUMPH!" : "### :skull: YOU LOST!"
+-            color := (matchResult = "Triumph") ? 3066993 : 12434877
+-            SendScreenshot(pBitmap, headerTitle, color)
+-            Gdip_DisposeImage(pBitmap)
++        if shouldSendWebhook {
++            pBitmap := Gdip_BitmapFromScreen()
++            if (pBitmap) {
++                headerTitle := (matchResult = "Triumph") ? "### :trophy: TRIUMPH!" : "### :skull: YOU LOST!"
++                color := (matchResult = "Triumph") ? 3066993 : 12434877
++                SendScreenshot(pBitmap, headerTitle, color)
++                Gdip_DisposeImage(pBitmap)
++            }
+         }
+     }
+ 
+-    if (SendCurrenciesEnabled = "1") {
++    shouldReadRewards := (SendCurrenciesEnabled = "1" || RewardTrackerIsEnabled())
++    if (shouldReadRewards && FoundX > 0) {
+         targetX := FoundX - sX(180)
+         targetY := FoundY - sY(250)
+         AreaW := sX(340)
+         AreaH := sY(230)
+ 
+         ocrTarget := ""
+-        pBitmapArea := Gdip_BitmapFromScreen(targetX . "|" . targetY . "|" . AreaW . "|" . AreaH)
++        pBitmapArea := Gdip_BitmapFromScreen((pX + targetX) . "|" . (pY + targetY) . "|" . AreaW . "|" . AreaH)
+         if (pBitmapArea) {
+             pBitmapResized := Gdip_CreateBitmap(AreaW * 3, AreaH * 3)
+             if (pBitmapResized) {
+@@ -285,7 +295,7 @@
+         InfoH := sY(240)
+ 
+         ocrInfo := ""
+-        pBitmapInfo := Gdip_BitmapFromScreen(infoX . "|" . infoY . "|" . InfoW . "|" . InfoH)
++        pBitmapInfo := Gdip_BitmapFromScreen((pX + infoX) . "|" . (pY + infoY) . "|" . InfoW . "|" . InfoH)
+         if (pBitmapInfo) {
+             pBitmapInfoResized := Gdip_CreateBitmap(InfoW * 3, InfoH * 3)
+             if (pBitmapInfoResized) {
+@@ -343,6 +353,20 @@
+ 
+     }
+ 
++    if (mapName = "Unknown" && configuredMap != "")
++        mapName := configuredMap
++
++    if RewardTrackerIsEnabled() {
++        if (matchResult = "Triumph") {
++            RewardTrackerAppend(runId, mapName, modeName, strategyPath, "coins", "Coins", coinVal, 1.0, "official-result-ocr")
++            RewardTrackerAppend(runId, mapName, modeName, strategyPath, "gems", "Gems", gemVal, 1.0, "official-result-ocr")
++            RewardTrackerAppend(runId, mapName, modeName, strategyPath, "xp", "XP", expVal, 1.0, "official-result-ocr")
++            knownItems := RewardTrackerScanKnownItems(runId, mapName, modeName, strategyPath, pX, pY, w, h)
++            evidencePath := RewardTrackerCaptureEvidence(runId, pX, pY, w, h)
++        }
++        RewardTrackerRecordRun(runId, matchResult, mapName, modeName, strategyPath, timeInSeconds, evidencePath)
++    }
++
+     totalTriumphs := IniRead(StateFile, "State", "TotalTriumphs", 0)
+     totalLosses := IniRead(StateFile, "State", "TotalLosses", 0)
+     
+@@ -410,20 +434,27 @@
+         description .= "Map: **" mapName "**  Time Completed: **" timeCompleted "**`n"
+         description .= "+" expVal " EXP (+" totalExp ")`n"
+         description .= "+" coinVal " Coins (+" totalCoins ")  +" gemVal " Gems (+" totalGems ")`n"
++        if (knownItems.Length > 0) {
++            for item in knownItems
++                description .= "+" item.quantity " " item.display "`n"
++        }
+         description .= "-# Total Matches: " totalMatches ", wins: " totalTriumphs ", losses: " totalLosses ", W/R: " winrate "%, W/L ratio: " wlRatioStr ", " coinsPerHour " coins/h, " gemsPerHour " gems/h, " expPerHour " exp/h, avg. time: " avgTimeStr
+     }
+ 
+-    pBitmap := Gdip_BitmapFromScreen()
+-    if (pBitmap) {
+-        SendScreenshot(pBitmap, description, color, WebhookTriumphScreenshots)
+-        If IsSet(pBitmapInfo){
+-            Gdip_DisposeImage(pBitmapInfo)
++    if shouldSendWebhook {
++        pBitmap := Gdip_BitmapFromScreen()
++        if (pBitmap) {
++            SendScreenshot(pBitmap, description, color, WebhookTriumphScreenshots)
++            if IsSet(pBitmapInfo)
++                Gdip_DisposeImage(pBitmapInfo)
++            Gdip_DisposeImage(pBitmap)
+         }
+-        Gdip_DisposeImage(pBitmap)
+-    }
+-    if (WebhookLink = WebhookLink2) {
+-        WebhookLink := IniRead(SettingsFile, "Webhook", "Link", "")
++    } else if IsSet(pBitmapInfo) {
++        Gdip_DisposeImage(pBitmapInfo)
+     }
++
++    if usingSeparateWebhook
++        WebhookLink := originalWebhookLink
+ }
+ 
+ BinarizeTargetBitmap(pBitmap) {
+@@ -597,7 +628,7 @@
+     query := "SELECT * FROM Win32_Process WHERE Name = 'AutoHotkey.exe' OR Name = 'AutoHotkeyU64.exe' OR Name = 'AutoHotkeyU32.exe' OR Name = 'AutoHotkey64.exe' OR Name = 'AutoHotkey32.exe'"
+     for process in wmi.ExecQuery(query) {
+         cmd := process.CommandLine
+-        if (InStr(cmd, "Main.ahk")) {
++        if (InStr(cmd, "Main.ahk") || InStr(cmd, "Main_Lab.ahk")) {
+             try ProcessClose(process.ProcessId)
+         }
+     }
+@@ -612,7 +643,7 @@
+     query := "SELECT * FROM Win32_Process WHERE Name = 'AutoHotkey.exe' OR Name = 'AutoHotkeyU64.exe' OR Name = 'AutoHotkeyU32.exe' OR Name = 'AutoHotkey64.exe' OR Name = 'AutoHotkey32.exe'"
+     for process in wmi.ExecQuery(query) {
+         cmd := process.CommandLine
+-        if (InStr(cmd, "Main.ahk")) {
++        if (InStr(cmd, "Main.ahk") || InStr(cmd, "Main_Lab.ahk")) {
+             try ProcessClose(process.ProcessId)
+         }
+     }
+@@ -621,9 +652,9 @@
+     WebhookEnabled := (tempWebhook = "1") ? true : false
+ 
+     if (A_PtrSize == 4) {
+-    Run('"' A_WorkingDir '\submacros\AutoHotkey32.exe" "' A_WorkingDir '\Main.ahk"')
++    Run('"' A_WorkingDir '\submacros\AutoHotkey32.exe" "' A_WorkingDir '\Main_Lab.ahk"')
+     } else {
+-        Run('"' A_WorkingDir '\submacros\AutoHotkey64.exe" "' A_WorkingDir '\Main.ahk"')
++        Run('"' A_WorkingDir '\submacros\AutoHotkey64.exe" "' A_WorkingDir '\Main_Lab.ahk"')
+     }
+ 
+     ExitApp()
