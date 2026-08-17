@@ -1,0 +1,172 @@
+--- a/Main.ahk
++++ b/Main_Lab.ahk
+@@ -39,9 +39,13 @@
+ #Include "%A_ScriptDir%\lib\Roblox.ahk"
+ #Include "%A_ScriptDir%\lib\HyperSleep.ahk"
+ #Include "%A_ScriptDir%\lib\ImageSearch\ImageSearch.ahk"
++#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorCore.ahk"
++#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorTab.ahk"
++#Include "%A_ScriptDir%\lib\StrategyLab\RewardTrackerCore.ahk"
++#Include "%A_ScriptDir%\lib\StrategyLab\RewardTrackerTab.ahk"
+ #Include "%A_ScriptDir%\submacros\updater.ahk"
+ 
+-ver := "1.3.3"
++ver := "1.3.3-lab.0.1"
+ 
+ A_MaxHotkeysPerInterval := 9999
+ 
+@@ -227,6 +231,8 @@
+ 
+ WM_LBUTTONDOWN_Drag(wParam, lParam, msg, hwnd) {
+     global MainGui
++    if StrategyEditorTryBeginDrag(hwnd)
++        return 0
+     If (MainGui) {
+         if (hwnd != MainGui.Hwnd) {
+             return
+@@ -533,11 +539,8 @@
+     RunningStrategy := false
+     IniWrite(0, StateFile, "State", "Running")
+ } else {
+-    updateResult := CheckForUpdate(ver)
+-    if (updateResult = 2) {
+-        SafeReload()
+-    }
+-
++    ; Strategy Lab preview is pinned to the bundled official 1.3.3 baseline.
++    ; Do not let the upstream updater replace Main_Lab.ahk during private testing.
+     MultiInstanceTools := "RobloxAccountManager.exe,Roblox Account Manager.exe,RAM.exe,RobloxMulti.exe,MultiRoblox.exe,MultipleRoblox.exe,Multiple Roblox.exe"
+     Loop Parse, MultiInstanceTools, "," {
+         if ProcessExist(A_LoopField) {
+@@ -561,7 +564,7 @@
+     SystemHwnds[sysIcon.Hwnd] := true
+ }
+ 
+-global GuiTitleCtrl := MainGui.Add("Text", "x50 y12 w150 h25 BackgroundTrans", "Ultimate Macro | TDS")
++global GuiTitleCtrl := MainGui.Add("Text", "x50 y12 w260 h25 BackgroundTrans", "Ultimate Macro | Strategy Lab")
+ GuiTitleCtrl.OnEvent("Click", MoveWindow)
+ SystemHwnds[GuiTitleCtrl.Hwnd] := true
+ 
+@@ -594,23 +597,27 @@
+ 
+ ;==
+ 
+-tabNames := ["Main", "Record", "(Beta) Party", "Webhook", "Settings", "Tools", "Credits"]
++tabNames := ["Main", "Record", "Party", "Webhook", "Settings", "Tools", "Editor", "Stats", "Credits"]
++
++global LabTabStartX := 12
++global LabTabStep := 75
++global LabTabWidth := 70
+ 
+ Loop tabNames.Length {
+     i   := A_Index
+-    xTab := 20 + (i-1) * 90
+-    
+-    hBg := MainGui.Add("Progress", "x" xTab " y43 w80 h34 Hidden Background222222 Disabled")
++    xTab := LabTabStartX + (i-1) * LabTabStep
++
++    hBg := MainGui.Add("Progress", "x" xTab " y43 w" LabTabWidth " h34 Hidden Background222222 Disabled")
+     HoverTab.Push(hBg)
+     SystemHwnds[hBg.Hwnd] := true 
+     
+-    t := MainGui.Add("Text", "x" xTab " y52 w80 h22 Center BackgroundTrans", tabNames[i])
++    t := MainGui.Add("Text", "x" xTab " y52 w" LabTabWidth " h22 Center BackgroundTrans", tabNames[i])
+     t.OnEvent("Click", SelectTab)
+     TabCtrl.Push(t)
+     SystemHwnds[t.Hwnd] := true 
+ }
+ 
+-global TabLine := MainGui.Add("Progress", "x20 y75 w80 h2 BackgroundFFFFFF", 0)
++global TabLine := MainGui.Add("Progress", "x" LabTabStartX " y75 w" LabTabWidth " h2 BackgroundFFFFFF", 0)
+ SystemHwnds[TabLine.Hwnd] := true 
+ 
+ sysLine2 := MainGui.Add("Progress", "x0 y77 w700 h1 Background222222", 0)
+@@ -1372,7 +1379,15 @@
+ Auto_Consum.OnEvent("Click", RunAutoConsumableTool)
+ 
+ 
+-; tab 7 - credits ===========================
++; tab 7 - visual strategy editor ===========================
++
++StrategyEditorCreateTab(MainGui)
++
++; tab 8 - rewards / analytics ===========================
++
++RewardTrackerCreateTab(MainGui)
++
++; tab 9 - credits ===========================
+ 
+ MainGui.SetFont("s18 bold cFFFFFF", "Segoe UI")
+ global Credit_TITLE := MainGui.Add("Text", "x30 y95 w640 Hidden Center", "Ultimate Macro")
+@@ -1404,7 +1419,7 @@
+ global FooterBg := MainGui.Add("Progress", "x0 y501 w700 h64 Disabled Hidden Background0f0f0f", 0)
+ 
+ MainGui.SetFont("s10 italic cFFFFFF", "Segoe UI")
+-global version_text := MainGui.Add("Text", "x30 y520 BackgroundTrans Hidden", ver " * made by darksen")
++global version_text := MainGui.Add("Text", "x30 y520 BackgroundTrans Hidden", ver " * Darksen official baseline")
+ 
+ global githubImg := MainGui.Add("Picture", "x580 y520 w24 h-1 Hidden BackgroundTrans", "Resources\github.png")
+ githubImg.OnEvent("Click", githubLink)
+@@ -1413,7 +1428,7 @@
+ global YoutubeImg := MainGui.Add("Picture", "x642 y520 w24 h-1 Hidden BackgroundTrans", "Resources\youtube.png")
+ YoutubeImg.OnEvent("Click", YouTubeLink)
+ 
+-MainGui.Title := "Ultimate Macro"
++MainGui.Title := "Ultimate Macro Strategy Lab"
+ MainGui.Show("w700 h565")
+ 
+ if (AlwaysOnTop = 1) {
+@@ -1444,7 +1459,7 @@
+ ~F2:: StopStrategy(0, 0)
+ 
+ SelectTab(ctrl, *) {
+-    global CurrentTab, TabCtrl, TabLine, HoverTab
++    global CurrentTab, TabCtrl, TabLine, HoverTab, LabTabStartX, LabTabStep, LabTabWidth
+     idx := 0
+     Loop HoverTab.Length {
+         if (TabCtrl[A_Index] = ctrl) {
+@@ -1466,8 +1481,8 @@
+     TabCtrl[idx].SetFont("cFFFFFF")
+     
+     
+-    newX := 20 + (idx - 1) * 90
+-    TabLine.Move(newX, , 80)
++    newX := LabTabStartX + (idx - 1) * LabTabStep
++    TabLine.Move(newX, , LabTabWidth)
+     
+     ShowTabContent(newTab)
+ }
+@@ -1790,6 +1805,10 @@
+         for ctrl in [Tools_Section, Tools_Section_Line, Tools_Info, Auto_COA, Auto_Spin, Auto_Consum]
+             ctrl.Visible := true
+     } else if (tab = "Tab7") {
++        StrategyEditorShow()
++    } else if (tab = "Tab8") {
++        RewardTrackerShow()
++    } else if (tab = "Tab9") {
+         Credit_Content.Visible := true
+         Credit_Info.Visible := true
+         Credit_Support.Visible := true
+@@ -2062,6 +2081,10 @@
+     IniDelete(StateFile, "State", "TimeWhenStartedPlaying")
+     IniDelete(StateFile, "State", "Equipped")
+ 
++    ; A manual Start begins a new Reward Tracker session. Automatic per-run
++    ; watchdog restarts reuse this session instead of resetting it.
++    RewardTrackerBeginSession(true)
++
+     AutorunStartTime := 0
+ 
+     LoadStrategyFile(stratFile)
+@@ -7257,9 +7280,9 @@
+ startWatchdog() {
+     currentPID := DllCall("GetCurrentProcessId")
+     if (A_PtrSize == 4) {
+-    Run('"' A_ScriptDir '\submacros\AutoHotkey32.exe" "' A_ScriptDir '\submacros\watchdog.ahk" ' currentPID, , , &watchdogPID)
++    Run('"' A_ScriptDir '\submacros\AutoHotkey32.exe" "' A_ScriptDir '\submacros\watchdog_lab.ahk" ' currentPID, , , &watchdogPID)
+     } else {
+-    Run('"' A_ScriptDir '\submacros\AutoHotkey64.exe" "' A_ScriptDir '\submacros\watchdog.ahk" ' currentPID, , , &watchdogPID)
++    Run('"' A_ScriptDir '\submacros\AutoHotkey64.exe" "' A_ScriptDir '\submacros\watchdog_lab.ahk" ' currentPID, , , &watchdogPID)
+     }
+ }
+ 
