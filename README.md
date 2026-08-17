@@ -4,36 +4,47 @@ Private development lab for experimental Ultimate Macro features before upstream
 
 **Compatibility baseline: Darksen official Ultimate Macro 1.3.3.** Kronox improvements are evaluated as selective ports on top of that baseline, never as a wholesale replacement.
 
+**Current Windows test build: Lab Preview 0.1.1.**
+
 Current goals:
 
-1. **Visual Strategy Editor** — parse `.strat` files, render `SpawnTower(x,y,slot,id)` actions on a scaled 1920x1080 viewport, filter them as layers, drag placements, and rewrite only the selected coordinates while preserving every other recorded step.
-2. **Reward Tracker** — attach to the existing result-screen/watchdog boundary, record standard currencies and extensible item rewards (crates, event currencies, ducks, etc.) into per-run/session/lifetime ledgers, and save evidence for unknown rewards instead of guessing.
+1. **Visual Strategy Editor** — parse `.strat` files, render `SpawnTower(x,y,slot,id)` actions on the macro recording plane, filter them as layers, drag placements, and rewrite only the selected coordinates while preserving every other recorded step.
+2. **Reward Tracker** — attach to the existing result-screen/watchdog boundary, record standard currencies and extensible item rewards into per-run/session/lifetime ledgers, and save evidence for unknown rewards instead of guessing.
 3. **Selective Kronox improvements** — evaluate and port reliability/analytics/editor ideas that do not weaken gameplay timing or the Remote safety boundary.
+4. **Private Lab updater** — one-time private GitHub authorization followed by prompt-based self-updates, SHA-256 verification and rollback backups without replacing `Resources/Strats` or AppData state.
+
+## Preview 0.1.1
+
+- Integrated `Editor` and `Stats` tabs on top of official 1.3.3.
+- `Capture` hides Strategy Lab before taking the Roblox client screenshot and restores the GUI in a `finally` path.
+- Private update channel lives under `channel/stable/`.
+- Installed Lab version is stored separately in `lab_version.ini`, allowing normal module updates without replacing the large `Main_Lab.ahk` just to bump a version number.
+- The updater rejects traversal/rooted paths, refuses `Resources/Strats`, verifies SHA-256 before replacement and backs up files before applying changes.
+- Static/integration suite: **8 tests passing** before packaging 0.1.1.
 
 ## Privacy / status
 
 This lab is intentionally separate from the Remote repository currently shared for upstream review. Do not publish or invite upstream reviewers until the prototypes have passed local testing.
 
-## Visual editor prototype
+## Visual editor
 
-`src/VisualStrategyEditor.ahk` is a standalone AutoHotkey v2 prototype. It does **not** execute a strategy. It only edits `.strat` text.
+The integrated editor does **not** execute strategy text. It edits only placement coordinates in memory until explicitly saved.
 
-- Open a `.strat` file.
-- Optionally load a screenshot of the Roblox/TDS viewport as the background.
-- Each `SpawnTower` action becomes a draggable marker.
-- Use the Layer selector to show all placements or only one hotbar slot/tower.
-- Drag a marker to its corrected position.
-- **Save Copy** writes a new file.
-- **Overwrite + Backup** creates a timestamped backup before replacing the original.
+- Open a `.strat` or use current Strategy 1.
+- Load a screenshot or capture the current Roblox client.
+- Each `SpawnTower` becomes a draggable marker.
+- Layer by hotbar slot/tower.
+- Drag or type X/Y directly.
+- Undo / Redo.
+- Save Copy or Overwrite + automatic backup.
+- Non-placement actions such as upgrades, abilities, `ChangeTargets()`, `ToggleAutoskip()` and unknown future actions are preserved.
 
-The first prototype intentionally assumes the macro's normal 1920x1080 coordinate space. The eventual in-macro tab will derive the live Roblox client size and can capture the current viewport directly.
+## Reward tracker
 
-## Reward tracker design
+The tracker runs at the confirmed result/watchdog boundary, never inside `PlayStrategy()`. It records runs and confirmed rewards, keeps session/lifetime totals, handles Roblox windows away from desktop `(0,0)`, and stores evidence when item recognition is uncertain.
 
-See `docs/reward-tracker.md`. The first integration target is the watchdog's already-validated Triumph/result boundary, not the strategy playback loop.
-
-See `docs/baseline-1.3.3.md` for the compatibility contract and `docs/port-plan.md` for the tracked Kronox improvements.
+See `docs/reward-tracker.md`, `docs/baseline-1.3.3.md` and `docs/port-plan.md`.
 
 ## Source notes
 
-The design was compared against Darksen's Ultimate Macro and Kronox's GPL-3.0 fork. If implementation code is later ported from GPL sources, preserve the required license/attribution in the integrated project.
+The design was compared against Darksen's Ultimate Macro and Kronox's GPL-3.0 fork. If implementation code is ported from GPL sources, preserve required license/attribution.
