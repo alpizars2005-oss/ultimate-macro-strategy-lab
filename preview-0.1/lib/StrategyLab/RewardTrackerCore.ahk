@@ -264,9 +264,19 @@ RewardTrackerScanKnownItems(runId, mapName, modeName, strategyPath, clientX, cli
 }
 
 RewardTrackerOcrItemQuantity(match, clientX, clientY) {
-    ; ImageSearch returns Roblox-client coordinates. GDI+ capture needs screen coordinates.
-    qX := Max(0, match.x - Round(match.w * 0.25))
-    qY := Max(0, match.y + Round(match.h * 0.72))
+    ; The OpenCV path returns Roblox-client coordinates. The inherited GDI+
+    ; fallback currently reports screen coordinates, so normalize that path
+    ; before building a screen-space OCR crop.
+    matchX := match.x
+    matchY := match.y
+    try {
+        if (match.HasOwnProp("message") && InStr(match.message, "Gdip fallback")) {
+            matchX -= clientX
+            matchY -= clientY
+        }
+    }
+    qX := Max(0, matchX - Round(match.w * 0.25))
+    qY := Max(0, matchY + Round(match.h * 0.72))
     qW := Max(45, Round(match.w * 1.50))
     qH := Max(28, Round(match.h * 0.65))
 
