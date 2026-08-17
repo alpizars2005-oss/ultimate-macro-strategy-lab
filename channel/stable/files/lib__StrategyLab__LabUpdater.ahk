@@ -5,7 +5,12 @@
 ; No GitHub token, PAT, Discord credential, or arbitrary download URL is stored here.
 
 LabUpdaterRepoUrl() => "https://github.com/alpizars2005-oss/ultimate-macro-strategy-lab.git"
-LabUpdaterCacheRoot() => A_LocalAppData "\Ultimate_Macro\StrategyLabUpdater"
+LabUpdaterCacheRoot() {
+    localAppData := EnvGet("LOCALAPPDATA")
+    if (localAppData = "")
+        localAppData := A_AppData
+    return localAppData "\Ultimate_Macro\StrategyLabUpdater"
+}
 LabUpdaterCacheRepo() => LabUpdaterCacheRoot() "\repo"
 LabUpdaterChannelRoot() => LabUpdaterCacheRepo() "\channel\stable"
 LabUpdaterVersionFile() => LabUpdaterChannelRoot() "\version.ini"
