@@ -1,0 +1,38 @@
+#Requires AutoHotkey v2.0
+#Include "%A_ScriptDir%\lib\StrategyLab\MapLibrary.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\TowerCatalog.ahk"
+
+; Integrated Strategy Editor tab for Main_Lab.ahk.
+
+global LabEditorCtrls := []
+global LabEditorMarkerCtrls := []
+global LabEditorMarkerByHwnd := Map()
+global LabEditorDoc := ""
+global LabEditorLayer := "All placements"
+global LabEditorSelectedRow := 0
+global LabEditorDragPlacement := ""
+global LabEditorDragMarker := ""
+global LabEditorDragOldX := 0
+global LabEditorDragOldY := 0
+global LabEditorViewport := LabMapViewport()
+global LabEditorSourceImage := ""
+global LabEditorBackgroundMode := "none"
+global LabEditorExpanded := false
+global LabEditorCurrentMap := ""
+global LabEditorAssetSyncPid := 0
+global LabEditorAssetsRequested := false
+global LabEditorViewportPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport.png"
+
+global LabEditorCanvasX := 30
+global LabEditorCanvasY := 180
+global LabEditorCanvasW := 420
+global LabEditorCanvasH := 236
+
+OnMessage(0x0200, StrategyEditorMouseMove)
+OnMessage(0x0202, StrategyEditorMouseUp)
+OnMessage(0x020A, StrategyEditorMouseWheel)
+
+#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorUi.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorPlacements.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorMaps.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorSave.ahk"
