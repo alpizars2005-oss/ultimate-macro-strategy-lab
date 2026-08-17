@@ -4,6 +4,8 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = (ROOT / "Main_Lab.ahk").read_text(encoding="utf-8-sig")
 WATCHDOG = (ROOT / "submacros" / "watchdog_lab.ahk").read_text(encoding="utf-8-sig")
+EDITOR_TAB = (ROOT / "lib" / "StrategyLab" / "StrategyEditorTab.ahk").read_text(encoding="utf-8-sig")
+REWARD_CORE = (ROOT / "lib" / "StrategyLab" / "RewardTrackerCore.ahk").read_text(encoding="utf-8-sig")
 
 SPAWN_RE = re.compile(
     r"(?i)^(\s*SpawnTower\(\s*)(-?\d+)(\s*,\s*)(-?\d+)(\s*,\s*[^,]+?\s*,\s*[^)]+?\s*\)\s*)$"
@@ -77,3 +79,11 @@ def test_133_actions_are_untouched_by_coordinate_rewrite():
     edited = [rewrite(sample[0], 620, 490)] + sample[1:]
     assert edited[0] == "SpawnTower(620, 490, 2, dj1)"
     assert edited[1:] == sample[1:]
+
+
+def test_editor_refreshes_markers_without_recreating_them_and_reward_fallback_is_normalized():
+    assert "StrategyEditorRefreshVisuals()" in EDITOR_TAB
+    assert 'DllCall("DestroyWindow"' in EDITOR_TAB
+    assert 'InStr(match.message, "Gdip fallback")' in REWARD_CORE
+    assert "matchX -= clientX" in REWARD_CORE
+    assert "matchY -= clientY" in REWARD_CORE
