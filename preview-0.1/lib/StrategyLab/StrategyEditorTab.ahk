@@ -212,12 +212,39 @@ StrategyEditorBuildMarkers() {
 }
 
 StrategyEditorClearMarkers() {
-    global LabEditorMarkerCtrls
+    global LabEditorMarkerCtrls, LabEditorMarkerByHwnd
     for entry in LabEditorMarkerCtrls {
         try entry.ctrl.Visible := false
-        try entry.ctrl.Destroy()
+        ; Gui.Control does not expose a portable Destroy() method in AHK v2.
+        ; Destroy the child HWND explicitly when loading a different document so
+        ; repeated loads do not accumulate hidden marker windows.
+        try DllCall("DestroyWindow", "Ptr", entry.ctrl.Hwnd)
     }
     LabEditorMarkerCtrls := []
+    LabEditorMarkerByHwnd := Map()
+}
+
+StrategyEditorRefreshVisuals() {
+    global LabEditorDoc, LabEditorList, LabEditorMarkerCtrls
+    global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
+    if !IsObject(LabEditorDoc)
+        return
+
+    LabEditorList.Delete()
+    for index, placement in LabEditorDoc.Placements {
+        LabEditorList.Add(, index, placement.towerId, placement.slot, placement.x, placement.y)
+        if (index > LabEditorMarkerCtrls.Length)
+            continue
+        entry := LabEditorMarkerCtrls[index]
+        px := LabEditorCanvasX + Round((placement.x / LabEditorDoc.StrategyWidth) * LabEditorCanvasW)
+        py := LabEditorCanvasY + Round((placement.y / LabEditorDoc.StrategyHeight) * LabEditorCanvasH)
+        px := Max(LabEditorCanvasX + 8, Min(LabEditorCanvasX + LabEditorCanvasW - 8, px))
+        py := Max(LabEditorCanvasY + 8, Min(LabEditorCanvasY + LabEditorCanvasH - 8, py))
+        entry.ctrl.Move(px - 8, py - 8)
+        entry.placement := placement
+        entry.index := index
+    }
+    StrategyEditorApplyLayer()
 }
 
 StrategyEditorPlacementVisible(placement) {
@@ -269,7 +296,7 @@ StrategyEditorApplyCoordinates(*) {
     }
     placement := LabEditorDoc.Placements[LabEditorSelectedRow]
     LabEditorDoc.MovePlacement(placement, LabEditorXCtrl.Text, LabEditorYCtrl.Text)
-    StrategyEditorBuildMarkers()
+    StrategyEditorRefreshVisuals()
     StrategyEditorSelectPlacement(LabEditorSelectedRow)
     StrategyEditorSetStatus("Updated " placement.towerId " to (" placement.x ", " placement.y "). Not saved yet.")
     StrategyEditorRefreshButtons()
@@ -283,7 +310,7 @@ StrategyEditorUndo(*) {
     placement := LabEditorDoc.Undo()
     if placement {
         row := StrategyEditorFindPlacementRow(placement)
-        StrategyEditorBuildMarkers()
+        StrategyEditorRefreshVisuals()
         StrategyEditorSelectPlacement(row)
         StrategyEditorSetStatus("Undo: " placement.towerId " is back at (" placement.x ", " placement.y ").")
     }
@@ -298,7 +325,7 @@ StrategyEditorRedo(*) {
     placement := LabEditorDoc.Redo()
     if placement {
         row := StrategyEditorFindPlacementRow(placement)
-        StrategyEditorBuildMarkers()
+        StrategyEditorRefreshVisuals()
         StrategyEditorSelectPlacement(row)
         StrategyEditorSetStatus("Redo: " placement.towerId " moved to (" placement.x ", " placement.y ").")
     }
@@ -354,7 +381,7 @@ StrategyEditorMouseUp(wParam, lParam, msg, hwnd) {
     LabEditorDragMarker := ""
 
     row := StrategyEditorFindPlacementRow(placement)
-    StrategyEditorBuildMarkers()
+    StrategyEditorRefreshVisuals()
     StrategyEditorSelectPlacement(row)
     if changed
         StrategyEditorSetStatus("Moved " placement.towerId " to (" placement.x ", " placement.y "). Not saved yet.")
