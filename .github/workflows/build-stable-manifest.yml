@@ -1,0 +1,59 @@
+name: Build stable update manifest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'channel/stable/files/**'
+      - 'channel/stable/files.map'
+      - '.github/workflows/build-stable-manifest.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate SHA-256 manifest
+        shell: python
+        run: |
+          from pathlib import Path
+          import base64, hashlib
+
+          root = Path('.')
+          mapping = root / 'channel/stable/files.map'
+          out = root / 'channel/stable/files.manifest'
+          lines = ['# sha256|target|source|mode']
+
+          for raw in mapping.read_text(encoding='utf-8').splitlines():
+              line = raw.strip()
+              if not line or line.startswith('#'):
+                  continue
+              target, source, mode = [part.strip() for part in line.split('|')]
+              data = (root / source).read_bytes()
+              if mode == 'base64':
+                  data = base64.b64decode(data.decode('ascii').strip())
+              elif mode != 'raw':
+                  raise SystemExit(f'Unsupported mode: {mode}')
+              digest = hashlib.sha256(data).hexdigest()
+              lines.append(f'{digest}|{target}|{source}|{mode}')
+
+          out.write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
+
+      - name: Commit generated manifest
+        shell: bash
+        run: |
+          if git diff --quiet -- channel/stable/files.manifest; then
+            echo 'Manifest already current.'
+            exit 0
+          fi
+          git config user.name 'Strategy Lab Manifest Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add channel/stable/files.manifest
+          git commit -m 'build(updater): refresh stable SHA-256 manifest [skip ci]'
+          git push
