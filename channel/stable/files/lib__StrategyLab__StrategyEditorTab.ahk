@@ -33,6 +33,7 @@ global LabEditorCanvasH := 238
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorMaps.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorSave.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorInteraction.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorWorkspace.ahk"
 
 OnMessage(0x0201, StrategyEditorDirectMouseDown)
 OnMessage(0x0200, StrategyEditorInteractiveMouseMove)
