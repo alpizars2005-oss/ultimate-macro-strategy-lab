@@ -5,9 +5,21 @@
 ; Ultimate Macro strategies, which may be UTF-8, ANSI, UTF-16LE with/without a BOM,
 ; and may contain one or more harmless terminal NUL code units.
 
+LabStrategyHasNul(text) {
+    length := StrLen(text)
+    Loop length {
+        if (Ord(SubStr(text, A_Index, 1)) = 0)
+            return true
+    }
+    return false
+}
+
 LabStrategyTrimTerminalNuls(text) {
     removed := 0
-    while (StrLen(text) > 0 && SubStr(text, -1) = Chr(0)) {
+    while (StrLen(text) > 0) {
+        tail := SubStr(text, -1, 1)
+        if (Ord(tail) != 0)
+            break
         text := SubStr(text, 1, StrLen(text) - 1)
         removed += 1
     }
@@ -110,7 +122,7 @@ LabStrategyReadFile(path) {
     trimmed := LabStrategyTrimTerminalNuls(text)
     text := trimmed.Text
 
-    if InStr(text, Chr(0))
+    if LabStrategyHasNul(text)
         throw Error("Strategy contains embedded NUL bytes inside its text and cannot be edited safely.")
 
     return {Text: text, Encoding: encoding, TerminalNuls: trimmed.Removed}
