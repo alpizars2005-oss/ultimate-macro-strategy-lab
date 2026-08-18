@@ -15,8 +15,32 @@ function Write-Utf8NoBom([string]$Path,[string]$Text) {
     [IO.File]::WriteAllText($Path, $Text, (New-Object Text.UTF8Encoding($false)))
 }
 
+function Normalize-InstallDir([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        throw 'InstallDir is empty.'
+    }
+
+    # Older run_lab.bat builds passed %~dp0 directly. Because that value ends in a
+    # backslash, Windows command-line parsing can preserve a stray quote at the end
+    # (for example C:\Macro\"). Strip only wrapping/stray quote characters, expand
+    # environment variables, then canonicalize the path before touching files.
+    $candidate = [Environment]::ExpandEnvironmentVariables($Value.Trim()).Trim('"')
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        throw 'InstallDir became empty after normalization.'
+    }
+
+    $full = [IO.Path]::GetFullPath($candidate)
+    if (!(Test-Path -LiteralPath $full -PathType Container)) {
+        throw "InstallDir does not exist: $full"
+    }
+    return $full
+}
+
 try {
-    $main = Join-Path $InstallDir 'Main_Lab.ahk'
+    $installRoot = Normalize-InstallDir $InstallDir
+    Log ("INFO InstallDir raw=<{0}> normalized=<{1}>" -f $InstallDir, $installRoot)
+
+    $main = Join-Path $installRoot 'Main_Lab.ahk'
     if (!(Test-Path -LiteralPath $main -PathType Leaf)) {
         Log 'ERROR Main_Lab.ahk is missing.'
         exit 2
