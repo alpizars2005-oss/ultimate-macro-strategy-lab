@@ -18,7 +18,6 @@ function Fail([string]$Message, [int]$Code = 1) {
     exit $Code
 }
 
-$probePath = $null
 try {
     $candidate = [Environment]::ExpandEnvironmentVariables($InstallDir.Trim()).Trim('"')
     $InstallDir = [IO.Path]::GetFullPath($candidate)
@@ -31,26 +30,13 @@ try {
     $text = [IO.File]::ReadAllText($main)
     if ($text -match '(?m)^(<<<<<<<|=======|>>>>>>>)') { Fail 'Main_Lab.ahk contains unresolved merge markers.' 4 }
 
-    # AutoHotkey parses the complete script (including #Include files) before it runs
-    # the first statement. Insert an immediate ExitApp into a temporary sibling copy:
-    # runtime side effects never happen, while parser/arity/include errors still fail.
-    $insertAt = 0
-    $m = [regex]::Match($text, '(?m)^#SingleInstance[^\r\n]*(?:\r?\n|$)')
-    if ($m.Success) {
-        $insertAt = $m.Index + $m.Length
-    } else {
-        $m = [regex]::Match($text, '(?m)^#Requires[^\r\n]*(?:\r?\n|$)')
-        if ($m.Success) { $insertAt = $m.Index + $m.Length }
-    }
-
-    $newline = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
-    $probeText = $text.Substring(0, $insertAt) + 'ExitApp()' + $newline + $text.Substring($insertAt)
-    $probePath = Join-Path $InstallDir 'Main_Lab.__strategy_lab_syntax_probe.ahk'
-    [IO.File]::WriteAllText($probePath, $probeText, (New-Object Text.UTF8Encoding($false)))
-
+    # AutoHotkey v2 has a purpose-built /Validate switch: it loads, optimizes and
+    # validates the entire script (including #Includes) and then exits WITHOUT running
+    # the auto-execute section. This is safer and deterministic compared with injecting
+    # ExitApp into a temporary copy. /ErrorStdOut keeps load errors out of GUI dialogs.
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = $ahk
-    $psi.Arguments = '/ErrorStdOut "' + $probePath + '"'
+    $psi.Arguments = '/Validate /ErrorStdOut=UTF-8 "' + $main + '"'
     $psi.WorkingDirectory = $InstallDir
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
@@ -59,29 +45,29 @@ try {
 
     $proc = New-Object Diagnostics.Process
     $proc.StartInfo = $psi
-    if (!$proc.Start()) { Fail 'Could not start the bundled AutoHotkey parser.' 5 }
+    if (!$proc.Start()) { Fail 'Could not start the bundled AutoHotkey validator.' 5 }
 
+    # Read asynchronously enough to avoid pipe-buffer deadlocks while still enforcing a
+    # bounded validation time.
+    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+    $stderrTask = $proc.StandardError.ReadToEndAsync()
     if (!$proc.WaitForExit(20000)) {
         try { $proc.Kill() } catch {}
-        Fail 'AutoHotkey syntax probe timed out after 20 seconds.' 6
+        Fail 'AutoHotkey /Validate timed out after 20 seconds.' 6
     }
 
-    $stdout = $proc.StandardOutput.ReadToEnd()
-    $stderr = $proc.StandardError.ReadToEnd()
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
     $combined = (($stdout + "`r`n" + $stderr).Trim())
 
+    if ($combined) { Log ('AHK ' + ($combined -replace "`r?`n", ' | ')) }
     if ($proc.ExitCode -ne 0 -or $combined -match '(?im)^Error:') {
-        if ($combined) { Log ('AHK ' + ($combined -replace "`r?`n", ' | ')) }
-        Fail ("Integrated AutoHotkey syntax check failed. See $logPath") 7
+        Fail ("Integrated AutoHotkey validation failed. See $logPath") 7
     }
 
-    Log 'OK integrated Main_Lab + Strategy Lab syntax probe passed.'
-    if (!$Quiet) { Write-Host 'Strategy Lab syntax check passed.' -ForegroundColor Green }
+    Log 'OK integrated Main_Lab + Strategy Lab /Validate passed.'
+    if (!$Quiet) { Write-Host 'Strategy Lab AutoHotkey validation passed.' -ForegroundColor Green }
     exit 0
 } catch {
     Fail ('syntax probe exception: ' + $_.Exception.Message) 10
-} finally {
-    if ($probePath -and (Test-Path -LiteralPath $probePath)) {
-        Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
-    }
 }
