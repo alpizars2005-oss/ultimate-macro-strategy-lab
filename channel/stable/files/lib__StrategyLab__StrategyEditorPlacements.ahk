@@ -20,9 +20,23 @@ StrategyEditorBuildLayers() {
     LabEditorLayer := "All placements"
 }
 
+StrategyEditorMarkerLabel(placement) {
+    global LabEditorDoc
+    rawTower := LabEditorDoc.TowerNameForSlot(placement.slot)
+    if (rawTower = "")
+        return String(placement.slot)
+    entry := LabTowerResolve(rawTower)
+    if (entry.placementLimit = 1)
+        return StrUpper(SubStr(entry.name, 1, 1))
+    return String(LabTowerOccurrence(LabEditorDoc, placement))
+}
+
+StrategyEditorMarkerClicked(index, *) {
+    StrategyEditorSelectPlacement(index)
+}
+
 StrategyEditorBuildMarkers() {
     global LabEditorDoc, LabEditorList, LabEditorMarkerCtrls, LabEditorMarkerByHwnd, MainGui
-    global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
 
     StrategyEditorClearMarkers()
     LabEditorList.Delete()
@@ -31,7 +45,6 @@ StrategyEditorBuildMarkers() {
 
     colors := ["B04747", "476FB0", "4A8F59", "9C6CB0", "B08A47"]
     for index, placement in LabEditorDoc.Placements {
-        tower := LabEditorDoc.TowerNameForSlot(placement.slot)
         LabEditorList.Add(, index, LabTowerPlacementDisplay(LabEditorDoc, placement), placement.x, placement.y)
 
         point := StrategyEditorPlacementPoint(placement)
@@ -40,10 +53,11 @@ StrategyEditorBuildMarkers() {
 
         slotNum := IsNumber(placement.slot) ? Integer(placement.slot) : 1
         color := colors[Max(1, Min(colors.Length, slotNum))]
-        marker := MainGui.Add("Text", "x" (px - 8) " y" (py - 8)
-            " w16 h16 Hidden Center +Border Background" color " cFFFFFF", index)
-        marker.SetFont("s6 w700", "Segoe UI")
-        entry := {ctrl: marker, placement: placement, index: index}
+        marker := MainGui.Add("Text", "x" (px - 9) " y" (py - 9)
+            " w18 h18 Hidden Center +Border Background" color " cFFFFFF", StrategyEditorMarkerLabel(placement))
+        marker.SetFont("s7 w700", "Segoe UI")
+        marker.OnEvent("Click", StrategyEditorMarkerClicked.Bind(index))
+        entry := {ctrl: marker, placement: placement, index: index, color: color}
         LabEditorMarkerCtrls.Push(entry)
         LabEditorMarkerByHwnd[marker.Hwnd] := entry
     }
@@ -54,9 +68,6 @@ StrategyEditorClearMarkers() {
     global LabEditorMarkerCtrls, LabEditorMarkerByHwnd
     for entry in LabEditorMarkerCtrls {
         try entry.ctrl.Visible := false
-        ; Gui.Control does not expose a portable Destroy() method in AHK v2.
-        ; Destroy the child HWND explicitly when loading a different document so
-        ; repeated loads do not accumulate hidden marker windows.
         try DllCall("DestroyWindow", "Ptr", entry.ctrl.Hwnd)
     }
     LabEditorMarkerCtrls := []
@@ -64,8 +75,7 @@ StrategyEditorClearMarkers() {
 }
 
 StrategyEditorRefreshVisuals() {
-    global LabEditorDoc, LabEditorList, LabEditorMarkerCtrls
-    global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
+    global LabEditorDoc, LabEditorList, LabEditorMarkerCtrls, LabEditorSelectedRow
     if !IsObject(LabEditorDoc)
         return
 
@@ -76,9 +86,9 @@ StrategyEditorRefreshVisuals() {
             continue
         entry := LabEditorMarkerCtrls[index]
         point := StrategyEditorPlacementPoint(placement)
-        px := point.x
-        py := point.y
-        entry.ctrl.Move(px - 8, py - 8)
+        size := index = LabEditorSelectedRow ? 22 : 18
+        entry.ctrl.Move(point.x - Floor(size / 2), point.y - Floor(size / 2), size, size)
+        entry.ctrl.SetFont(index = LabEditorSelectedRow ? "s8 w700" : "s7 w700", "Segoe UI")
         entry.placement := placement
         entry.index := index
     }
@@ -123,6 +133,7 @@ StrategyEditorSelectPlacement(row) {
     LabEditorYCtrl.Text := placement.y
     StrategyEditorShowTower(placement)
     try LabEditorList.Modify(row, "Vis Select Focus")
+    StrategyEditorRefreshVisuals()
 }
 
 StrategyEditorApplyCoordinates(*) {
@@ -195,8 +206,8 @@ StrategyEditorMouseMove(wParam, lParam, msg, hwnd) {
     logical := StrategyEditorViewportToStrategy(mx, my)
     newX := logical.x
     newY := logical.y
-    LabEditorDragMarker.Move(mx - 8, my - 8)
-    StrategyEditorSetStatus("Preview " LabEditorDragPlacement.towerId " -> (" newX ", " newY ")")
+    LabEditorDragMarker.Move(mx - 11, my - 11, 22, 22)
+    StrategyEditorSetStatus("Preview " LabEditorDragPlacement.towerId " → (" newX ", " newY ")")
     return 0
 }
 
