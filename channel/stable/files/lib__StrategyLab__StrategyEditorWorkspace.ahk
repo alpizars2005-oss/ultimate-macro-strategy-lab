@@ -15,7 +15,9 @@ global LabEditorWorkspaceCanvasH := 340
 global LabEditorWorkspaceExpandedW := 960
 global LabEditorWorkspaceExpandedH := 440
 
-SetTimer(StrategyEditorWorkspaceMonitor, 150)
+; A short poll keeps tab transitions feeling immediate without tying the module to
+; Main.ahk's initialization order.
+SetTimer(StrategyEditorWorkspaceMonitor, 75)
 
 StrategyEditorWorkspaceMonitor(*) {
     global LabEditorWorkspaceActive, LabEditorWorkspaceLastExpanded, LabEditorExpanded
@@ -117,8 +119,6 @@ StrategyEditorWorkspaceApply(rerender := false) {
     try LabEditorDirty.Move(20, 594, 640, 20)
     try LabEditorStatus.Move(20, 620, 960, 42)
 
-    if (geometryChanged || rerender) {
+    if (geometryChanged || rerender)
         try StrategyEditorRenderBackground()
-        try StrategyEditorRefreshVisuals()
-    }
 }
