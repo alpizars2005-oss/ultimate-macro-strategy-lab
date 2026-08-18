@@ -6,7 +6,7 @@ LabTowerSafeKey(value) {
     return Trim(key, "-")
 }
 
-LabTowerCatalogPath() => A_WorkingDir "\Resources\StrategyLab\Towers\catalog.ini"
+LabTowerCatalogPath() => A_ScriptDir "\Resources\StrategyLab\Towers\catalog.ini"
 
 LabTowerPortraitDir() {
     dir := A_AppData "\Ultimate_Macro\StrategyEditor\TowerLibrary"
@@ -50,14 +50,21 @@ LabTowerResolve(towerName) {
     return {key: key, name: Trim(String(towerName)), wikiPage: Trim(String(towerName)), placementLimit: 0, aliases: towerName}
 }
 
-LabTowerPortraitPath(towerName) {
+LabTowerCachedPortraitPath(towerName) {
     entry := LabTowerResolve(towerName)
     for ext in ["png", "jpg", "jpeg", "bmp"] {
         path := LabTowerPortraitDir() "\" entry.key "." ext
         if FileExist(path)
             return path
     }
-    placeholder := A_WorkingDir "\Resources\StrategyLab\Towers\placeholder.png"
+    return ""
+}
+
+LabTowerPortraitPath(towerName) {
+    cached := LabTowerCachedPortraitPath(towerName)
+    if (cached != "")
+        return cached
+    placeholder := A_ScriptDir "\Resources\StrategyLab\Towers\placeholder.png"
     return FileExist(placeholder) ? placeholder : ""
 }
 
@@ -78,8 +85,19 @@ LabTowerPlacementDisplay(document, placement) {
     if (rawTower = "")
         rawTower := "Slot " placement.slot
     entry := LabTowerResolve(rawTower)
-    ; A placement-limit of exactly one is intentionally shown without #1.
     if (entry.placementLimit = 1)
         return entry.name
     return entry.name " #" LabTowerOccurrence(document, placement)
+}
+
+LabTowerPlacementMeta(document, placement) {
+    rawTower := document.TowerNameForSlot(placement.slot)
+    if (rawTower = "")
+        rawTower := "Slot " placement.slot
+    entry := LabTowerResolve(rawTower)
+    occurrence := LabTowerOccurrence(document, placement)
+    limitText := entry.placementLimit = 1
+        ? "Unique placement"
+        : (entry.placementLimit > 1 ? "Placement " occurrence " of " entry.placementLimit : "Placement " occurrence)
+    return "Slot " placement.slot "  •  " limitText
 }
