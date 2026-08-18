@@ -3,6 +3,10 @@
 ; Direct map interaction layer.
 ; Wheel zooms around the cursor. Dragging empty canvas pans the viewport.
 ; Dragging a placement continues to move that placement through the existing editor path.
+;
+; Important: this module intentionally does NOT depend on Main.ahk's CurrentTab
+; variable. Some upstream builds assign tab state later in startup, so reading
+; CurrentTab from a timer can throw before the Editor has ever been opened.
 
 global LabEditorPanActive := false
 global LabEditorPanStartX := 0
@@ -12,13 +16,22 @@ global LabEditorPanStartCenterY := 0.5
 global LabEditorPanLastRender := 0
 global LabEditorDirectNavInstallAttempts := 0
 
+StrategyEditorIsActive() {
+    global LabEditorCanvasBg, LabEditorSnapshot
+    if !IsSet(LabEditorCanvasBg) || !IsObject(LabEditorCanvasBg)
+        return false
+    if LabEditorCanvasBg.Visible
+        return true
+    return IsSet(LabEditorSnapshot) && IsObject(LabEditorSnapshot) && LabEditorSnapshot.Visible
+}
+
 StrategyEditorDirectMouseDown(wParam, lParam, msg, hwnd) {
-    global CurrentTab, LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
+    global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
     global LabEditorPanActive, LabEditorPanStartX, LabEditorPanStartY
     global LabEditorPanStartCenterX, LabEditorPanStartCenterY, LabEditorPanLastRender
     global LabEditorViewport, MainGui
 
-    if (CurrentTab != "Tab7")
+    if !StrategyEditorIsActive()
         return
 
     ; Marker clicks belong to tower dragging, never map panning.
@@ -81,10 +94,10 @@ StrategyEditorInteractiveMouseUp(wParam, lParam, msg, hwnd) {
 }
 
 StrategyEditorInteractiveWheel(wParam, lParam, msg, hwnd) {
-    global CurrentTab, LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
+    global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
     global LabEditorViewport
 
-    if (CurrentTab != "Tab7")
+    if !StrategyEditorIsActive()
         return
     StrategyEditorGetClientCursor(&mx, &my)
     if (mx < LabEditorCanvasX || mx > LabEditorCanvasX + LabEditorCanvasW
@@ -144,17 +157,17 @@ StrategyEditorHideLegacyPanButtons() {
     ; Keep the old controls alive for compatibility, but direct manipulation replaces them.
     for ctrl in [LabEditorPanLeftBtn, LabEditorPanUpBtn, LabEditorPanDownBtn, LabEditorPanRightBtn] {
         ctrl.Enabled := false
+        ctrl.Visible := false
         ctrl.Move(-1000, -1000, 1, 1)
     }
 }
 
 StrategyEditorInteractiveStateGuard(*) {
-    global CurrentTab, LabEditorDoc, LabEditorSelectedRow, LabEditorDirty
-    if (CurrentTab != "Tab7")
+    global LabEditorDoc, LabEditorSelectedRow, LabEditorDirty
+    if !StrategyEditorIsActive()
         return
 
-    ; StrategyEditorShow() can make all legacy controls visible again; their off-screen
-    ; position remains permanent, and this guard keeps them disabled too.
+    ; StrategyEditorShow() can make all legacy controls visible again.
     StrategyEditorHideLegacyPanButtons()
 
     if !IsObject(LabEditorDoc)
@@ -164,9 +177,9 @@ StrategyEditorInteractiveStateGuard(*) {
         StrategyEditorSelectPlacement(1)
 
     ; Recover from stale empty-state text after asynchronous asset/UI refreshes.
-    if (LabEditorDirty.Text = "No strategy loaded.")
+    if IsSet(LabEditorDirty) && IsObject(LabEditorDirty) && LabEditorDirty.Text = "No strategy loaded."
         StrategyEditorRefreshDirty()
 }
 
 SetTimer(StrategyEditorInstallDirectNavigation, -250)
-SetTimer(StrategyEditorInteractiveStateGuard, 600)
+SetTimer(StrategyEditorInteractiveStateGuard, 400)
