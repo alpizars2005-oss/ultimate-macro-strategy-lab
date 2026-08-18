@@ -48,12 +48,9 @@ StrategyEditorBuildMarkers() {
         LabEditorList.Add(, index, LabTowerPlacementDisplay(LabEditorDoc, placement), placement.x, placement.y)
 
         point := StrategyEditorPlacementPoint(placement)
-        px := point.x
-        py := point.y
-
         slotNum := IsNumber(placement.slot) ? Integer(placement.slot) : 1
         color := colors[Max(1, Min(colors.Length, slotNum))]
-        marker := MainGui.Add("Text", "x" (px - 9) " y" (py - 9)
+        marker := MainGui.Add("Text", "x" (point.x - 9) " y" (point.y - 9)
             " w18 h18 Hidden Center +Border Background" color " cFFFFFF", StrategyEditorMarkerLabel(placement))
         marker.SetFont("s7 w700", "Segoe UI")
         marker.OnEvent("Click", StrategyEditorMarkerClicked.Bind(index))
@@ -61,6 +58,7 @@ StrategyEditorBuildMarkers() {
         LabEditorMarkerCtrls.Push(entry)
         LabEditorMarkerByHwnd[marker.Hwnd] := entry
     }
+    StrategyEditorRefreshMarkerSelection()
     StrategyEditorApplyLayer()
 }
 
@@ -74,8 +72,18 @@ StrategyEditorClearMarkers() {
     LabEditorMarkerByHwnd := Map()
 }
 
+StrategyEditorRefreshMarkerSelection() {
+    global LabEditorMarkerCtrls, LabEditorSelectedRow
+    for index, entry in LabEditorMarkerCtrls {
+        point := StrategyEditorPlacementPoint(entry.placement)
+        size := index = LabEditorSelectedRow ? 22 : 18
+        entry.ctrl.Move(point.x - Floor(size / 2), point.y - Floor(size / 2), size, size)
+        entry.ctrl.SetFont(index = LabEditorSelectedRow ? "s8 w700" : "s7 w700", "Segoe UI")
+    }
+}
+
 StrategyEditorRefreshVisuals() {
-    global LabEditorDoc, LabEditorList, LabEditorMarkerCtrls, LabEditorSelectedRow
+    global LabEditorDoc, LabEditorList, LabEditorMarkerCtrls
     if !IsObject(LabEditorDoc)
         return
 
@@ -85,13 +93,10 @@ StrategyEditorRefreshVisuals() {
         if (index > LabEditorMarkerCtrls.Length)
             continue
         entry := LabEditorMarkerCtrls[index]
-        point := StrategyEditorPlacementPoint(placement)
-        size := index = LabEditorSelectedRow ? 22 : 18
-        entry.ctrl.Move(point.x - Floor(size / 2), point.y - Floor(size / 2), size, size)
-        entry.ctrl.SetFont(index = LabEditorSelectedRow ? "s8 w700" : "s7 w700", "Segoe UI")
         entry.placement := placement
         entry.index := index
     }
+    StrategyEditorRefreshMarkerSelection()
     StrategyEditorApplyLayer()
 }
 
@@ -132,8 +137,8 @@ StrategyEditorSelectPlacement(row) {
     LabEditorXCtrl.Text := placement.x
     LabEditorYCtrl.Text := placement.y
     StrategyEditorShowTower(placement)
+    StrategyEditorRefreshMarkerSelection()
     try LabEditorList.Modify(row, "Vis Select Focus")
-    StrategyEditorRefreshVisuals()
 }
 
 StrategyEditorApplyCoordinates(*) {
