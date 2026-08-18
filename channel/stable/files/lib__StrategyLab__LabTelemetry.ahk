@@ -1,8 +1,9 @@
 #Requires AutoHotkey v2.0
 
-; Low-overhead, append-only telemetry. It observes the official state.ini counters
-; instead of guessing game outcomes, so one official result-counter increment becomes
-; one ledger event. No polling or OCR occurs inside PlayStrategy().
+; Low-overhead, append-only telemetry. It observes Ultimate Macro's official state.ini
+; counters and never performs OCR or gameplay polling inside PlayStrategy(). Timer
+; callbacks are intentionally fail-safe: malformed/missing state values are treated as
+; defaults instead of surfacing an exception that could terminate the macro.
 
 global LabTelemetryLastWins := ""
 global LabTelemetryLastLosses := ""
@@ -28,9 +29,16 @@ LabTelemetryEscape(value) {
 }
 
 LabTelemetryQuoteArg(value) {
-    ; Windows filenames cannot contain a literal double quote, so normal quoted
-    ; arguments are enough here. Keep command construction simple and parse-safe.
+    ; Windows filenames cannot contain a literal double quote.
     return '"' value '"'
+}
+
+LabTelemetryReadInteger(file, section, key, defaultValue := 0) {
+    value := defaultValue
+    try value := IniRead(file, section, key, defaultValue)
+    if !IsNumber(value)
+        return Integer(defaultValue)
+    return Integer(value)
 }
 
 LabTelemetryStrategyFingerprint(path) {
@@ -51,31 +59,37 @@ LabTelemetryStrategyFingerprint(path) {
         . " -InputPath " LabTelemetryQuoteArg(path)
         . " -OutputPath " LabTelemetryQuoteArg(out)
 
-    try RunWait(cmd, , "Hide")
+    try RunWait(cmd, A_ScriptDir, "Hide")
     catch
         return ""
 
     if !FileExist(out)
         return ""
 
-    hash := Trim(FileRead(out, "UTF-8"))
+    hash := ""
+    try hash := Trim(FileRead(out, "UTF-8"))
     try FileDelete(out)
     return RegExMatch(hash, "i)^[0-9a-f]{64}$") ? StrUpper(hash) : ""
 }
 
 LabTelemetryAppendResult(result, wins, losses, strategyPath, coins, gems, exp, runCount) {
-    root := LabTelemetryEnsureDir()
-    ledger := root "\runs.jsonl"
-    fp := LabTelemetryStrategyFingerprint(strategyPath)
-    SplitPath(strategyPath, &strategyName)
-    stamp := FormatTime(, "yyyy-MM-ddTHH:mm:ss")
-    line := '{"timestamp":"' LabTelemetryEscape(stamp) '","result":"' result '","strategy":"'
-        . LabTelemetryEscape(strategyName) '","strategy_sha256":"' fp '","wins":' wins ',"losses":' losses
-        . ',"run_count":' runCount ',"coins":' coins ',"gems":' gems ',"exp":' exp '}' "`n"
-    FileAppend(line, ledger, "UTF-8-RAW")
+    try {
+        root := LabTelemetryEnsureDir()
+        ledger := root "\runs.jsonl"
+        fp := LabTelemetryStrategyFingerprint(strategyPath)
+        strategyName := ""
+        if (strategyPath != "")
+            try SplitPath(strategyPath, &strategyName)
+        stamp := FormatTime(, "yyyy-MM-ddTHH:mm:ss")
+        line := '{"timestamp":"' LabTelemetryEscape(stamp) '","result":"' LabTelemetryEscape(result)
+            . '","strategy":"' LabTelemetryEscape(strategyName) '","strategy_sha256":"' fp
+            . '","wins":' wins ',"losses":' losses ',"run_count":' runCount
+            . ',"coins":' coins ',"gems":' gems ',"exp":' exp '}' "`n"
+        FileAppend(line, ledger, "UTF-8-RAW")
+    }
 }
 
-LabTelemetryPhase(running, startedAt, wins, losses) {
+LabTelemetryPhase(running, startedAt) {
     if !running
         return "stopped"
     if IsNumber(startedAt) && Number(startedAt) > 0
@@ -84,51 +98,63 @@ LabTelemetryPhase(running, startedAt, wins, losses) {
 }
 
 LabTelemetryTick(*) {
-    global StateFile, LabTelemetryLastWins, LabTelemetryLastLosses, LabTelemetryLastStrategy, LabTelemetryLastHeartbeat
-    if !IsSet(StateFile) || StateFile = "" || !FileExist(StateFile)
-        return
+    global StateFile, LabTelemetryLastWins, LabTelemetryLastLosses
+    global LabTelemetryLastStrategy, LabTelemetryLastHeartbeat
 
-    wins := Integer(IniRead(StateFile, "State", "TotalTriumphs", 0))
-    losses := Integer(IniRead(StateFile, "State", "TotalLosses", 0))
-    strategy := IniRead(StateFile, "State", "Strategy", "")
-    coins := Integer(IniRead(StateFile, "State", "Coins", 0))
-    gems := Integer(IniRead(StateFile, "State", "Gems", 0))
-    exp := Integer(IniRead(StateFile, "State", "EXP", 0))
-    runCount := Integer(IniRead(StateFile, "State", "CurrentRunCount", 0))
-    running := IniRead(StateFile, "State", "Running", 0) = "1"
-    startedAt := IniRead(StateFile, "State", "TimeWhenStartedPlaying", 0)
+    try {
+        if !IsSet(StateFile) || StateFile = "" || !FileExist(StateFile)
+            return
 
-    if (LabTelemetryLastWins = "") {
-        LabTelemetryLastWins := wins
-        LabTelemetryLastLosses := losses
-    } else {
-        while (wins > LabTelemetryLastWins) {
-            LabTelemetryLastWins += 1
-            LabTelemetryAppendResult("win", LabTelemetryLastWins, losses, strategy, coins, gems, exp, runCount)
-        }
-        while (losses > LabTelemetryLastLosses) {
-            LabTelemetryLastLosses += 1
-            LabTelemetryAppendResult("loss", wins, LabTelemetryLastLosses, strategy, coins, gems, exp, runCount)
-        }
-        if (wins < LabTelemetryLastWins)
+        wins := LabTelemetryReadInteger(StateFile, "State", "TotalTriumphs", 0)
+        losses := LabTelemetryReadInteger(StateFile, "State", "TotalLosses", 0)
+        strategy := IniRead(StateFile, "State", "Strategy", "")
+        coins := LabTelemetryReadInteger(StateFile, "State", "Coins", 0)
+        gems := LabTelemetryReadInteger(StateFile, "State", "Gems", 0)
+        exp := LabTelemetryReadInteger(StateFile, "State", "EXP", 0)
+        runCount := LabTelemetryReadInteger(StateFile, "State", "CurrentRunCount", 0)
+        running := String(IniRead(StateFile, "State", "Running", 0)) = "1"
+        startedAt := IniRead(StateFile, "State", "TimeWhenStartedPlaying", 0)
+
+        ; The first observation establishes a baseline and never invents historical runs.
+        if (LabTelemetryLastWins = "") {
             LabTelemetryLastWins := wins
-        if (losses < LabTelemetryLastLosses)
             LabTelemetryLastLosses := losses
-    }
+        } else {
+            while (wins > LabTelemetryLastWins) {
+                LabTelemetryLastWins += 1
+                LabTelemetryAppendResult("win", LabTelemetryLastWins, losses, strategy, coins, gems, exp, runCount)
+            }
+            while (losses > LabTelemetryLastLosses) {
+                LabTelemetryLastLosses += 1
+                LabTelemetryAppendResult("loss", wins, LabTelemetryLastLosses, strategy, coins, gems, exp, runCount)
+            }
+            if (wins < LabTelemetryLastWins)
+                LabTelemetryLastWins := wins
+            if (losses < LabTelemetryLastLosses)
+                LabTelemetryLastLosses := losses
+        }
 
-    LabTelemetryLastStrategy := strategy
+        LabTelemetryLastStrategy := strategy
 
-    now := A_TickCount
-    if (!LabTelemetryLastHeartbeat || now - LabTelemetryLastHeartbeat >= 5000) {
-        LabTelemetryLastHeartbeat := now
-        root := LabTelemetryEnsureDir()
-        hb := root "\heartbeat.ini"
-        IniWrite(LabTelemetryPhase(running, startedAt, wins, losses), hb, "Heartbeat", "Phase")
-        IniWrite(running ? 1 : 0, hb, "Heartbeat", "Running")
-        IniWrite(strategy, hb, "Heartbeat", "Strategy")
-        IniWrite(wins, hb, "Heartbeat", "Wins")
-        IniWrite(losses, hb, "Heartbeat", "Losses")
-        IniWrite(A_NowUTC, hb, "Heartbeat", "UpdatedUTC")
+        now := A_TickCount
+        if (!LabTelemetryLastHeartbeat || now - LabTelemetryLastHeartbeat >= 5000) {
+            LabTelemetryLastHeartbeat := now
+            root := LabTelemetryEnsureDir()
+            hb := root "\heartbeat.ini"
+            try IniWrite(LabTelemetryPhase(running, startedAt), hb, "Heartbeat", "Phase")
+            try IniWrite(running ? 1 : 0, hb, "Heartbeat", "Running")
+            try IniWrite(strategy, hb, "Heartbeat", "Strategy")
+            try IniWrite(wins, hb, "Heartbeat", "Wins")
+            try IniWrite(losses, hb, "Heartbeat", "Losses")
+            try IniWrite(A_NowUTC, hb, "Heartbeat", "UpdatedUTC")
+        }
+    } catch Error as err {
+        ; Telemetry must never be able to bring down gameplay. Keep one lightweight
+        ; diagnostic line and retry naturally on the next timer tick.
+        try {
+            root := LabTelemetryEnsureDir()
+            FileAppend(FormatTime(, "yyyy-MM-dd HH:mm:ss") " " err.Message "`n", root "\telemetry-errors.log", "UTF-8")
+        }
     }
 }
 
