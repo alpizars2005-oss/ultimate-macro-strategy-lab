@@ -1,5 +1,10 @@
 #Requires AutoHotkey v2.0
 
+global LabEditorDragLastFrame := 0
+global LabEditorDragLastStatus := 0
+global LabEditorDragPreviewX := ""
+global LabEditorDragPreviewY := ""
+
 StrategyEditorBuildLayers() {
     global LabEditorDoc, LabEditorLayerCtrl, LabEditorLayer
     options := ["All placements"]
@@ -82,22 +87,30 @@ StrategyEditorRefreshMarkerSelection() {
     }
 }
 
-StrategyEditorRefreshVisuals() {
+; Fast path for pan/zoom/layout changes. It deliberately avoids rebuilding the
+; native ListView, which is one of the most expensive operations in the editor.
+StrategyEditorRefreshMarkerLayout() {
+    StrategyEditorRefreshMarkerSelection()
+    StrategyEditorApplyLayer()
+}
+
+StrategyEditorRefreshVisuals(rebuildList := true) {
     global LabEditorDoc, LabEditorList, LabEditorMarkerCtrls
     if !IsObject(LabEditorDoc)
         return
 
-    LabEditorList.Delete()
-    for index, placement in LabEditorDoc.Placements {
-        LabEditorList.Add(, index, LabTowerPlacementDisplay(LabEditorDoc, placement), placement.x, placement.y)
-        if (index > LabEditorMarkerCtrls.Length)
-            continue
-        entry := LabEditorMarkerCtrls[index]
-        entry.placement := placement
-        entry.index := index
+    if rebuildList {
+        LabEditorList.Delete()
+        for index, placement in LabEditorDoc.Placements {
+            LabEditorList.Add(, index, LabTowerPlacementDisplay(LabEditorDoc, placement), placement.x, placement.y)
+            if (index > LabEditorMarkerCtrls.Length)
+                continue
+            entry := LabEditorMarkerCtrls[index]
+            entry.placement := placement
+            entry.index := index
+        }
     }
-    StrategyEditorRefreshMarkerSelection()
-    StrategyEditorApplyLayer()
+    StrategyEditorRefreshMarkerLayout()
 }
 
 StrategyEditorPlacementVisible(placement) {
@@ -202,26 +215,50 @@ StrategyEditorFindPlacementRow(placement) {
 StrategyEditorMouseMove(wParam, lParam, msg, hwnd) {
     global LabEditorDoc, LabEditorDragPlacement, LabEditorDragMarker
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
+    global LabEditorDragLastFrame, LabEditorDragLastStatus, LabEditorDragPreviewX, LabEditorDragPreviewY
+    global LabEditorXCtrl, LabEditorYCtrl
+
     if !IsObject(LabEditorDoc) || !IsObject(LabEditorDragPlacement) || !IsObject(LabEditorDragMarker)
         return
+
+    ; Coalesce the very noisy WM_MOUSEMOVE stream to about 60 FPS. Windows can
+    ; otherwise deliver hundreds of move messages per second and make AHK repaint
+    ; text/status controls far more often than the monitor can display.
+    now := A_TickCount
+    if (LabEditorDragLastFrame && now - LabEditorDragLastFrame < 16)
+        return 0
+    LabEditorDragLastFrame := now
 
     StrategyEditorGetClientCursor(&mx, &my)
     mx := Max(LabEditorCanvasX, Min(LabEditorCanvasX + LabEditorCanvasW, mx))
     my := Max(LabEditorCanvasY, Min(LabEditorCanvasY + LabEditorCanvasH, my))
     logical := StrategyEditorViewportToStrategy(mx, my)
-    newX := logical.x
-    newY := logical.y
+    LabEditorDragPreviewX := logical.x
+    LabEditorDragPreviewY := logical.y
+
+    ; Moving one tiny marker is cheap; rebuilding the placement list is not.
     LabEditorDragMarker.Move(mx - 11, my - 11, 22, 22)
-    StrategyEditorSetStatus("Preview " LabEditorDragPlacement.towerId " → (" newX ", " newY ")")
+
+    ; Coordinate/status text updates are intentionally slower than marker motion.
+    ; This keeps dragging visually attached to the cursor while still giving live feedback.
+    if (!LabEditorDragLastStatus || now - LabEditorDragLastStatus >= 75) {
+        LabEditorDragLastStatus := now
+        try LabEditorXCtrl.Text := LabEditorDragPreviewX
+        try LabEditorYCtrl.Text := LabEditorDragPreviewY
+        StrategyEditorSetStatus("Preview " LabEditorDragPlacement.towerId " → (" LabEditorDragPreviewX ", " LabEditorDragPreviewY ")")
+    }
     return 0
 }
 
 StrategyEditorMouseUp(wParam, lParam, msg, hwnd) {
     global LabEditorDoc, LabEditorDragPlacement, LabEditorDragMarker
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
+    global LabEditorDragLastFrame, LabEditorDragLastStatus, LabEditorDragPreviewX, LabEditorDragPreviewY
+
     if !IsObject(LabEditorDoc) || !IsObject(LabEditorDragPlacement) || !IsObject(LabEditorDragMarker)
         return
 
+    ; Always sample the final cursor position rather than trusting the last throttled frame.
     StrategyEditorGetClientCursor(&mx, &my)
     mx := Max(LabEditorCanvasX, Min(LabEditorCanvasX + LabEditorCanvasW, mx))
     my := Max(LabEditorCanvasY, Min(LabEditorCanvasY + LabEditorCanvasH, my))
@@ -231,9 +268,13 @@ StrategyEditorMouseUp(wParam, lParam, msg, hwnd) {
 
     placement := LabEditorDragPlacement
     changed := LabEditorDoc.MovePlacement(placement, newX, newY)
-    DllCall("ReleaseCapture")
+    try DllCall("ReleaseCapture")
     LabEditorDragPlacement := ""
     LabEditorDragMarker := ""
+    LabEditorDragLastFrame := 0
+    LabEditorDragLastStatus := 0
+    LabEditorDragPreviewX := ""
+    LabEditorDragPreviewY := ""
 
     row := StrategyEditorFindPlacementRow(placement)
     StrategyEditorRefreshVisuals()
