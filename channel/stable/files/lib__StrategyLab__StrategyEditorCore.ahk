@@ -10,8 +10,14 @@ class LabStratDocument {
         if !FileExist(path)
             throw Error("Strategy file does not exist.")
         this.Path := path
-        this.Encoding := ""
-        this.Text := LabStrategyReadText(path, &this.Encoding)
+
+        ; AutoHotkey v2 ByRef (&) requires a real variable. Object properties such as
+        ; &this.Encoding are not legal ByRef targets and fail at parse time, so detect
+        ; into a local variable first and then assign the property.
+        detectedEncoding := ""
+        this.Text := LabStrategyReadText(path, &detectedEncoding)
+        this.Encoding := detectedEncoding
+
         this.Newline := InStr(this.Text, "`r`n") ? "`r`n" : "`n"
         normalized := StrReplace(this.Text, "`r")
         this.Lines := StrSplit(normalized, "`n")
