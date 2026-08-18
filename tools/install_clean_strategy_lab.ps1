@@ -121,7 +121,7 @@ function Install-StableFiles([string]$Root) {
 
 function Replace-ExactlyOnce([string]$Text,[string]$Old,[string]$New,[string]$Label) {
     $count = ([regex]::Matches($Text,[regex]::Escape($Old))).Count
-    if ($count -ne 1) { throw "$Label: expected exactly one baseline anchor, found $count." }
+    if ($count -ne 1) { throw "${Label}: expected exactly one baseline anchor, found $count." }
     return $Text.Replace($Old,$New)
 }
 
