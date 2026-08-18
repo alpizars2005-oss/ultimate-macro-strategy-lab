@@ -100,7 +100,7 @@ StrategyEditorWorkspaceApply(rerender := false) {
     global LabEditorOpenBtn, LabEditorCurrentBtn, LabEditorSnapshotBtn, LabEditorCaptureBtn
     global LabEditorUndoBtn, LabEditorRedoBtn, LabEditorZoomOutBtn, LabEditorZoomLabel
     global LabEditorZoomInBtn, LabEditorFitBtn, LabEditorExpandBtn
-    global LabEditorLayerLabel, LabEditorLayerCtrl, LabEditorSyncBtn, LabEditorMapLabel
+    global LabEditorLayerLabel, LabEditorLayerCtrl, LabEditorSyncBtn, LabEditorRingsBtn, LabEditorMapLabel
     global LabEditorCanvasBg, LabEditorSnapshot, LabEditorCanvasHint
     global LabEditorInfoPanel, LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList
     global LabEditorCoordLabel, LabEditorDirtyLabel, LabEditorXCtrl, LabEditorYCtrl
@@ -151,10 +151,14 @@ StrategyEditorWorkspaceApply(rerender := false) {
     try LabEditorFitBtn.Move(852, 145, 52, 28)
     try LabEditorExpandBtn.Move(910, 145, 70, 28)
 
-    ; Secondary toolbar leaves breathing room between filtering and map identity.
+    ; Secondary toolbar: filter, sync and placement-footprint overlays form one group.
     try LabEditorLayerLabel.Move(20, 181, 38, 18)
     try LabEditorLayerCtrl.Move(62, 177, 226, 24)
     try LabEditorSyncBtn.Move(298, 177, 104, 24)
+    try {
+        LabEditorRingsBtn.Text := StrategyEditorRingButtonText()
+        LabEditorRingsBtn.Move(412, 177, 92, 24)
+    }
     try LabEditorMapLabel.Move(680, 181, 300, 18)
 
     ; Main tactical canvas.
