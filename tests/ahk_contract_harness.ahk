@@ -1,12 +1,11 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
-; Execute nothing. AutoHotkey parses the complete script, all function declarations and
-; all #Include files before running this first statement, so parser/arity errors are
-; still caught while timers, OnExit hooks and GUI/module initialization never run.
+; Validate-only harness: CI invokes this file with AutoHotkey v2 /Validate, so none of
+; the runtime statements below execute. Function declarations and every #Include are
+; still loaded and validated, including known upstream function arity.
 ExitApp()
 
-; Minimal upstream contract stubs. These are parsed even though runtime already exited.
 StartStrategy(ctrl, *) {
 }
 
