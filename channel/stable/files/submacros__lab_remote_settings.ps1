@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory=$true)][string]$InstallDir
+    [Parameter(Mandatory=$true)][string]$InstallDir,
+    [switch]$SelfTest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,6 +33,18 @@ try {
     Add-Type -AssemblyName System.Drawing
     try { Add-Type -AssemblyName System.Security -ErrorAction Stop } catch { Log ('INFO System.Security already available/not separately loadable: ' + $_.Exception.Message) }
     [Windows.Forms.Application]::EnableVisualStyles()
+
+    # Runtime regression guard for the PowerShell 5.1 constructor bug which previously
+    # produced: System.Object[] does not contain a method named op_Subtraction.
+    $constructorProbe = [Drawing.Point]::new(180, (95 - 2))
+    $sizeProbe = [Drawing.Size]::new(330, 24)
+    if ($constructorProbe.X -ne 180 -or $constructorProbe.Y -ne 93 -or $sizeProbe.Width -ne 330) {
+        throw 'WinForms layout constructor self-test failed.'
+    }
+    if ($SelfTest) {
+        Log 'INFO remote settings WinForms constructor self-test passed.'
+        exit 0
+    }
 
     $configPath = Join-Path $root 'remote.ini'
     $workerPath = Join-Path $InstallDir 'submacros\lab_discord_worker.ps1'
@@ -90,15 +103,13 @@ try {
     }
 
     function Send-Test([string]$Token,[string]$Channel) {
-        $headers=@{Authorization=('Bot '+$Token);'User-Agent'='UltimateMacroStrategyLab/0.3.5'}
+        $headers=@{Authorization=('Bot '+$Token);'User-Agent'='UltimateMacroStrategyLab/0.3.7'}
         $payload=@{content='✅ Ultimate Macro Strategy Lab remote is connected.';allowed_mentions=@{parse=@()}} | ConvertTo-Json -Depth 4 -Compress
         Invoke-RestMethod -Uri "$apiBase/channels/$Channel/messages" -Headers $headers -Method Post -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($payload)) | Out-Null
     }
 
     function Start-DiscordWorker {
         if (!(Test-Path -LiteralPath $workerPath -PathType Leaf)) { throw "Discord worker is missing: $workerPath" }
-        # Start-Process flattens ArgumentList arrays in Windows PowerShell. Embed quotes
-        # explicitly so installations inside folders containing spaces remain valid.
         $args = '-NoLogo -NoProfile -ExecutionPolicy Bypass -File "{0}" -InstallDir "{1}"' -f $workerPath,$InstallDir
         $p = Start-Process -FilePath 'powershell.exe' -ArgumentList $args -WorkingDirectory $InstallDir -WindowStyle Hidden -PassThru
         Log ("INFO Discord worker launch requested PID={0}" -f $p.Id)
@@ -107,10 +118,10 @@ try {
     $ini=Read-Ini $configPath
     $existingToken=Unprotect-Token (Ini-Value $ini 'Remote' 'TokenProtected' '')
 
-    $form=New-Object Windows.Forms.Form
+    $form=[Windows.Forms.Form]::new()
     $form.Text='Strategy Lab Remote'
     $form.StartPosition='CenterScreen'
-    $form.ClientSize=New-Object Drawing.Size(540,440)
+    $form.ClientSize=[Drawing.Size]::new(540,440)
     $form.BackColor=[Drawing.Color]::FromArgb(18,18,18)
     $form.ForeColor=[Drawing.Color]::Gainsboro
     $form.FormBorderStyle='FixedDialog'
@@ -118,30 +129,37 @@ try {
     $form.MinimizeBox=$false
     $form.TopMost=$true
 
-    $title=New-Object Windows.Forms.Label
+    $title=[Windows.Forms.Label]::new()
     $title.Text='Discord Remote'
-    $title.Font=New-Object Drawing.Font('Segoe UI',16,[Drawing.FontStyle]::Bold)
+    $title.Font=[Drawing.Font]::new('Segoe UI',16,[Drawing.FontStyle]::Bold)
     $title.ForeColor=[Drawing.Color]::FromArgb(85,183,255)
-    $title.Location=New-Object Drawing.Point(24,18)
+    $title.Location=[Drawing.Point]::new(24,18)
     $title.AutoSize=$true
     $form.Controls.Add($title)
 
-    $sub=New-Object Windows.Forms.Label
+    $sub=[Windows.Forms.Label]::new()
     $sub.Text='Private controller • DPAPI-protected token • safe between-match switching'
-    $sub.Location=New-Object Drawing.Point(26,55)
+    $sub.Location=[Drawing.Point]::new(26,55)
     $sub.AutoSize=$true
     $sub.ForeColor=[Drawing.Color]::Gray
     $form.Controls.Add($sub)
 
     function Add-Label([string]$Text,[int]$Y) {
-        $l=New-Object Windows.Forms.Label
-        $l.Text=$Text; $l.Location=New-Object Drawing.Point(26,$Y); $l.Size=New-Object Drawing.Size(150,22)
-        $form.Controls.Add($l); return $l
+        $l=[Windows.Forms.Label]::new()
+        $l.Text=$Text
+        $l.Location=[Drawing.Point]::new(26,$Y)
+        $l.Size=[Drawing.Size]::new(150,22)
+        $form.Controls.Add($l)
+        return $l
     }
+
     function Add-Text([int]$Y,[string]$Value='') {
-        $t=New-Object Windows.Forms.TextBox
-        $t.Location=New-Object Drawing.Point(180,$Y-2); $t.Size=New-Object Drawing.Size(330,24); $t.Text=$Value
-        $form.Controls.Add($t); return $t
+        $t=[Windows.Forms.TextBox]::new()
+        $t.Location=[Drawing.Point]::new(180,($Y - 2))
+        $t.Size=[Drawing.Size]::new(330,24)
+        $t.Text=$Value
+        $form.Controls.Add($t)
+        return $t
     }
 
     Add-Label 'Bot token' 95 | Out-Null
@@ -154,33 +172,37 @@ try {
     Add-Label 'Poll interval (sec)' 215 | Out-Null
     $poll=Add-Text 215 (Ini-Value $ini 'Remote' 'PollSeconds' '4')
 
-    $enabled=New-Object Windows.Forms.CheckBox
+    $enabled=[Windows.Forms.CheckBox]::new()
     $enabled.Text='Enable Discord remote'
-    $enabled.Location=New-Object Drawing.Point(180,254)
+    $enabled.Location=[Drawing.Point]::new(180,254)
     $enabled.AutoSize=$true
     $enabled.Checked=(Ini-Value $ini 'Remote' 'Enabled' '0') -eq '1'
     $form.Controls.Add($enabled)
 
-    $hint=New-Object Windows.Forms.Label
+    $hint=[Windows.Forms.Label]::new()
     $hint.Text="Bot permissions: View Channel, Send Messages, Read Message History, Attach Files.`r`nEnable Message Content Intent. Only the configured user/channel can issue commands."
-    $hint.Location=New-Object Drawing.Point(26,292)
-    $hint.Size=New-Object Drawing.Size(484,52)
+    $hint.Location=[Drawing.Point]::new(26,292)
+    $hint.Size=[Drawing.Size]::new(484,52)
     $hint.ForeColor=[Drawing.Color]::DarkGray
     $form.Controls.Add($hint)
 
-    $status=New-Object Windows.Forms.Label
+    $status=[Windows.Forms.Label]::new()
     $status.Text='Ready.'
-    $status.Location=New-Object Drawing.Point(150,369)
-    $status.Size=New-Object Drawing.Size(205,28)
+    $status.Location=[Drawing.Point]::new(150,369)
+    $status.Size=[Drawing.Size]::new(205,28)
     $status.ForeColor=[Drawing.Color]::Silver
     $form.Controls.Add($status)
 
-    $test=New-Object Windows.Forms.Button
-    $test.Text='Test bot'; $test.Location=New-Object Drawing.Point(26,360); $test.Size=New-Object Drawing.Size(110,32)
+    $test=[Windows.Forms.Button]::new()
+    $test.Text='Test bot'
+    $test.Location=[Drawing.Point]::new(26,360)
+    $test.Size=[Drawing.Size]::new(110,32)
     $form.Controls.Add($test)
 
-    $save=New-Object Windows.Forms.Button
-    $save.Text='Save + Start'; $save.Location=New-Object Drawing.Point(370,360); $save.Size=New-Object Drawing.Size(140,32)
+    $save=[Windows.Forms.Button]::new()
+    $save.Text='Save + Start'
+    $save.Location=[Drawing.Point]::new(370,360)
+    $save.Size=[Drawing.Size]::new(140,32)
     $form.Controls.Add($save)
 
     $test.Add_Click({
@@ -216,7 +238,7 @@ try {
         }
     })
 
-    $form.Add_Shown({ $form.Activate() })
+    $form.Add_Shown({ $form.Activate(); $form.BringToFront() })
     Log ('INFO remote settings UI opened from ' + $InstallDir)
     [void]$form.ShowDialog()
     Log 'INFO remote settings UI closed.'
