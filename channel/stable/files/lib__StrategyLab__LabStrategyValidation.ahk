@@ -1,29 +1,25 @@
 #Requires AutoHotkey v2.0
 
 ; Defensive validation inspired by the strict-load contract in Macro-Recorder-JSON.
-; Ultimate Macro strategies may exist as UTF-8 or UTF-16 depending on the writer/
-; Windows environment. Detect the text encoding before validation instead of treating
-; UTF-16's zero high-bytes as malicious NUL corruption.
+; Keep the file decoder deliberately simple and AutoHotkey-v2-compatible: it returns
+; a small object instead of exposing a ByRef output parameter. This removes an entire
+; class of parser mistakes such as passing object properties to & parameters.
 
-LabStrategyReadText(path, &encoding := "") {
+LabStrategyReadFile(path) {
     if (path = "" || !FileExist(path))
         throw Error("Strategy file does not exist.")
 
-    ; UTF-8 is the normal Strategy Lab/upstream path. If decoded text contains NULs,
-    ; retry as UTF-16; this is the common signature of a valid UTF-16 strategy read as
-    ; UTF-8. FileRead's UTF-16 mode honors a BOM and otherwise uses little-endian.
+    ; Ultimate Macro normally writes text strategies. UTF-8 is tried first. A valid
+    ; UTF-16LE strategy read as UTF-8 contains NUL characters between many letters,
+    ; so retry UTF-16 only when that signature is present.
     text := FileRead(path, "UTF-8")
-    if !InStr(text, Chr(0)) {
-        encoding := "UTF-8"
-        return text
-    }
+    if !InStr(text, Chr(0))
+        return {Text: text, Encoding: "UTF-8"}
 
     try {
         text16 := FileRead(path, "UTF-16")
-        if !InStr(text16, Chr(0)) {
-            encoding := "UTF-16"
-            return text16
-        }
+        if !InStr(text16, Chr(0))
+            return {Text: text16, Encoding: "UTF-16"}
     }
 
     throw Error("Strategy contains embedded NUL bytes and cannot be edited safely.")
@@ -39,8 +35,9 @@ LabStrategyValidate(path) {
     if (size > 5 * 1024 * 1024)
         throw Error("Strategy file is larger than the 5 MB editor safety limit.")
 
-    encoding := ""
-    text := LabStrategyReadText(path, &encoding)
+    loaded := LabStrategyReadFile(path)
+    text := loaded.Text
+
     if !RegExMatch(text, "im)^\s*\[Steps\]\s*$")
         throw Error("Strategy does not contain a [Steps] section.")
 
@@ -50,12 +47,14 @@ LabStrategyValidate(path) {
         line := Trim(raw)
         if !RegExMatch(line, "i)^SpawnTower\(")
             continue
+
         spawnCount += 1
         if (spawnCount > 5000)
             throw Error("Strategy contains more than 5,000 SpawnTower placements.")
 
         if RegExMatch(line, "i)^SpawnTower\(\s*(-?\d+)\s*,\s*(-?\d+)", &m) {
-            x := Integer(m[1]), y := Integer(m[2])
+            x := Integer(m[1])
+            y := Integer(m[2])
             if (Abs(x) > 10000 || Abs(y) > 10000)
                 suspicious += 1
         }
@@ -66,5 +65,5 @@ LabStrategyValidate(path) {
     if (suspicious > 0)
         throw Error("Strategy contains placement coordinates outside the editor safety envelope.")
 
-    return {size: size, placements: spawnCount, encoding: encoding}
+    return {Size: size, Placements: spawnCount, Encoding: loaded.Encoding}
 }
