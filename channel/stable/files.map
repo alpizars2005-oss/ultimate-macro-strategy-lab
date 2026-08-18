@@ -7,6 +7,7 @@ lib/StrategyLab/StrategyEditorTab.ahk|channel/stable/files/lib__StrategyLab__Str
 lib/StrategyLab/StrategyEditorUi.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorUi.ahk|raw
 lib/StrategyLab/StrategyEditorPlacements.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorPlacements.ahk|raw
 lib/StrategyLab/StrategyEditorMaps.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorMaps.ahk|raw
+lib/StrategyLab/StrategyEditorInteraction.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorInteraction.ahk|raw
 lib/StrategyLab/StrategyEditorSave.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorSave.ahk|raw
 lib/StrategyLab/MapLibrary.ahk|channel/stable/files/lib__StrategyLab__MapLibrary.ahk|raw
 lib/StrategyLab/TowerCatalog.ahk|channel/stable/files/lib__StrategyLab__TowerCatalog.ahk|raw
