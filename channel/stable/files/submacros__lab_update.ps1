@@ -28,7 +28,7 @@ function Restart-StrategyLab {
     if (Test-Path -LiteralPath $runLab -PathType Leaf) {
         try {
             Start-Process -FilePath $runLab -WorkingDirectory $InstallDir | Out-Null
-            Log "Restarted Strategy Lab through run_lab.bat."
+            Log 'Restarted Strategy Lab through run_lab.bat.'
             return $true
         } catch {
             Log ('run_lab.bat restart failed: ' + $_.Exception.Message)
@@ -40,8 +40,8 @@ function Restart-StrategyLab {
         (Test-Path -LiteralPath $LauncherPath -PathType Leaf) -and
         (Test-Path -LiteralPath $EntryScript -PathType Leaf)) {
         try {
-            Start-Process -FilePath $LauncherPath -ArgumentList @('"' + $EntryScript + '"') -WorkingDirectory $InstallDir | Out-Null
-            Log "Restarted Strategy Lab through the current AutoHotkey executable."
+            Start-Process -FilePath $LauncherPath -ArgumentList ('"' + $EntryScript + '"') -WorkingDirectory $InstallDir | Out-Null
+            Log 'Restarted Strategy Lab through the current AutoHotkey executable.'
             return $true
         } catch {
             Log ('AutoHotkey restart failed: ' + $_.Exception.Message)
@@ -52,7 +52,7 @@ function Restart-StrategyLab {
     if (Test-Path -LiteralPath $mainLab -PathType Leaf) {
         try {
             Start-Process -FilePath $mainLab -WorkingDirectory $InstallDir | Out-Null
-            Log "Restarted Strategy Lab through Main_Lab.ahk shell association."
+            Log 'Restarted Strategy Lab through Main_Lab.ahk shell association.'
             return $true
         } catch {
             Log ('Main_Lab.ahk restart failed: ' + $_.Exception.Message)
@@ -63,7 +63,29 @@ function Restart-StrategyLab {
     return $false
 }
 
+function Restore-AppliedFiles($Applied, [string]$BackupRoot, [string]$TargetRoot) {
+    if ($null -eq $Applied) { return }
+    for ($i = $Applied.Count - 1; $i -ge 0; $i--) {
+        $item = $Applied[$i]
+        $target = Join-Path $TargetRoot $item.Relative
+        $backupTarget = Join-Path $BackupRoot $item.Relative
+        try {
+            if ($item.HadOriginal -and (Test-Path -LiteralPath $backupTarget -PathType Leaf)) {
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+                Copy-Item -LiteralPath $backupTarget -Destination $target -Force
+            } elseif (!$item.HadOriginal -and (Test-Path -LiteralPath $target -PathType Leaf)) {
+                Remove-Item -LiteralPath $target -Force
+            }
+        } catch {
+            Log ('ROLLBACK WARNING ' + $item.Relative + ': ' + $_.Exception.Message)
+        }
+    }
+}
+
 try {
+    $InstallDir = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($InstallDir.Trim()).Trim('"'))
+    $CacheDir = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($CacheDir.Trim()).Trim('"'))
+
     $deadline = (Get-Date).AddSeconds(15)
     while ((Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 200
@@ -140,22 +162,33 @@ try {
             $staged = Join-Path $stage $entry.Relative
             New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
 
-            if (Test-Path -LiteralPath $target -PathType Leaf) {
+            $hadOriginal = Test-Path -LiteralPath $target -PathType Leaf
+            if ($hadOriginal) {
                 $backupTarget = Join-Path $backup $entry.Relative
                 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backupTarget) | Out-Null
                 Copy-Item -LiteralPath $target -Destination $backupTarget -Force
             }
+
             Copy-Item -LiteralPath $staged -Destination $target -Force
-            $applied += $entry.Relative
+            $applied += [PSCustomObject]@{ Relative=$entry.Relative; HadOriginal=$hadOriginal }
+        }
+
+        # Validate the exact installed Main_Lab + all of its #Includes before declaring
+        # the update successful. The probe runs an immediate-exit sibling copy, so no
+        # gameplay code executes. A failure restores every file from this transaction.
+        $syntaxProbe = Join-Path $InstallDir 'submacros\lab_syntax_probe.ps1'
+        if (Test-Path -LiteralPath $syntaxProbe -PathType Leaf) {
+            & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $syntaxProbe -InstallDir $InstallDir -Quiet
+            if ($LASTEXITCODE -ne 0) {
+                throw "Integrated AutoHotkey syntax validation failed (exit $LASTEXITCODE)."
+            }
+            Log 'Post-update integrated AutoHotkey syntax validation passed.'
+        } else {
+            throw 'The update did not install the required lab_syntax_probe.ps1 reliability helper.'
         }
     } catch {
-        foreach ($rel in $applied) {
-            $backupTarget = Join-Path $backup $rel
-            $target = Join-Path $InstallDir $rel
-            if (Test-Path -LiteralPath $backupTarget -PathType Leaf) {
-                Copy-Item -LiteralPath $backupTarget -Destination $target -Force
-            }
-        }
+        Restore-AppliedFiles $applied $backup $InstallDir
+        Log ('ROLLBACK completed after apply/validation failure: ' + $_.Exception.Message)
         throw
     }
 
@@ -165,7 +198,7 @@ try {
     Log "Updated Strategy Lab to $ExpectedVersion ($($entries.Count) files)."
 
     if (!(Restart-StrategyLab)) {
-        Show-Message "Strategy Lab updated successfully, but Windows did not relaunch it automatically. Please open it once manually. Future attempts will keep using the saved restart paths."
+        Show-Message "Strategy Lab updated successfully, but Windows did not relaunch it automatically. Please open it once manually."
     }
 } catch {
     Log ('UPDATE FAILED: ' + $_.Exception.Message)
