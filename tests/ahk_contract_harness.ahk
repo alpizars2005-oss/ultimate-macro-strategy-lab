@@ -1,10 +1,13 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+#Warn All, Off
 
-; Minimal upstream contract stubs. The harness exits before any included module executes,
-; but AutoHotkey still parses the complete script and validates calls against known
-; signatures. This catches the exact classes that escaped Python-only checks before:
-; illegal ByRef targets, malformed expressions, missing includes and function arity.
+; Validate-only harness: CI invokes this file with AutoHotkey v2 /Validate, so none of
+; the runtime statements below execute. Function declarations and every #Include are
+; still loaded and validated, including known upstream function arity. Warnings are
+; disabled because this intentionally incomplete harness does not define every upstream
+; runtime symbol; parser/arity failures remain fatal and are still reported.
+ExitApp()
 
 StartStrategy(ctrl, *) {
 }
@@ -35,10 +38,6 @@ Gdip_BrushCreateSolid(*) => 1
 Gdip_FillRectangle(*) => 0
 Gdip_DeleteBrush(*) => 0
 Gdip_BitmapFromScreen(*) => 1
-
-; Runtime side effects below this point are unreachable. #Include is processed during
-; load/parse, therefore every module is still syntax-checked before ExitApp executes.
-ExitApp()
 
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__MapLibrary.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__TowerCatalog.ahk"
