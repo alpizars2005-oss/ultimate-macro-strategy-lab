@@ -60,6 +60,7 @@ jobs:
               'lib/StrategyLab/StrategyEditorUi.ahk',
               'lib/StrategyLab/StrategyEditorPlacements.ahk',
               'lib/StrategyLab/StrategyEditorMaps.ahk',
+              'lib/StrategyLab/StrategyEditorInteraction.ahk',
               'lib/StrategyLab/StrategyEditorWorkspace.ahk',
               'lib/StrategyLab/StrategyCalibration.ahk',
               'lib/StrategyLab/MapLibrary.ahk',
@@ -79,6 +80,19 @@ jobs:
           workspace = (root / source_for['lib/StrategyLab/StrategyEditorWorkspace.ahk']).read_text(encoding='utf-8-sig')
           assert 'LabEditorHeaderLine.Move(20, 137, 960, 1)' in workspace
           assert 'LabEditorWorkspaceCanvasW := 646' in workspace
+          assert 'SELECTED UNIT' in workspace
+          assert 'PLACEMENTS' in workspace
+          assert 'StrategyEditorRenderBackgroundBuffered()' in workspace
+
+          interaction = (root / source_for['lib/StrategyLab/StrategyEditorInteraction.ahk']).read_text(encoding='utf-8-sig')
+          assert 'StrategyEditorRenderBackgroundBuffered' in interaction
+          assert 'WM_SETREDRAW false' in interaction
+          assert 'RedrawWindow' in interaction
+
+          towers = (root / source_for['lib/StrategyLab/TowerCatalog.ahk']).read_text(encoding='utf-8-sig')
+          assert 'LabTowerPreparePreview' in towers
+          assert 'canvasSize := 320' in towers
+          assert 'scale := Min(usable / sourceW, usable / sourceH)' in towers
 
           calibration = (root / source_for['submacros/lab_calibration_worker.ahk']).read_text(encoding='utf-8-sig')
           assert 'TimeWhenStartedPlaying' in calibration
