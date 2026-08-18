@@ -1,22 +1,19 @@
 #Requires AutoHotkey v2.0
 
 ; Conservative .strat document editor.
-; It only rewrites the first two arguments of a selected SpawnTower line.
-; Every other line remains equivalent apart from newline normalization when the file
-; is intentionally saved. The original UTF-8/UTF-16 encoding is preserved.
+; Only the first two arguments of a selected SpawnTower line are rewritten. Unknown
+; and future actions remain untouched. The detected UTF-8/UTF-16 encoding is retained
+; when a copy or overwrite is intentionally saved.
 
 class LabStratDocument {
     __New(path) {
         if !FileExist(path)
             throw Error("Strategy file does not exist.")
-        this.Path := path
 
-        ; AutoHotkey v2 ByRef (&) requires a real variable. Object properties such as
-        ; &this.Encoding are not legal ByRef targets and fail at parse time, so detect
-        ; into a local variable first and then assign the property.
-        detectedEncoding := ""
-        this.Text := LabStrategyReadText(path, &detectedEncoding)
-        this.Encoding := detectedEncoding
+        this.Path := path
+        loaded := LabStrategyReadFile(path)
+        this.Text := loaded.Text
+        this.Encoding := loaded.Encoding
 
         this.Newline := InStr(this.Text, "`r`n") ? "`r`n" : "`n"
         normalized := StrReplace(this.Text, "`r")
@@ -99,6 +96,7 @@ class LabStratDocument {
             &parts
         )
             throw Error("Could not rewrite SpawnTower coordinates on line " placement.lineNo ".")
+
         updated := parts[1] newX parts[2] newY parts[3]
         this.Lines[placement.lineNo] := updated
         placement.x := newX
@@ -122,6 +120,7 @@ class LabStratDocument {
             })
             this.RedoStack := []
         }
+
         this.RewritePlacement(placement, newX, newY)
         return true
     }
