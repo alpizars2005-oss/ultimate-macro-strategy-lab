@@ -116,7 +116,7 @@ function Invoke-Wiki([hashtable]$Params) {
 }
 
 function Remove-OldImageVariants([string]$BasePath) {
-    foreach ($ext in @('.png','.jpg','.jpeg','.bmp','.webp','.download')) {
+    foreach ($ext in @('.png','.jpg','.jpeg','.bmp','.webp')) {
         Remove-Item -LiteralPath ($BasePath + $ext) -Force -ErrorAction SilentlyContinue
     }
 }
@@ -135,7 +135,7 @@ function Get-ImageKind([string]$Path) {
     return $null
 }
 
-function Save-Jpeg([System.Drawing.Bitmap]$Bitmap,[string]$Path,[int]$Quality) {
+function Save-Jpeg($Bitmap,[string]$Path,[int]$Quality) {
     $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
         Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
     $parameters = [System.Drawing.Imaging.EncoderParameters]::new(1)
