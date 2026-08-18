@@ -34,11 +34,14 @@ LabTowerCatalog() {
         section := Trim(section)
         if (section = "")
             continue
+        footprint := 1.5
+        try footprint := Number(IniRead(path, section, "placementFootprint", 1.5))
         entry := {
             key: LabTowerSafeKey(section),
             name: IniRead(path, section, "display", section),
             wikiPage: IniRead(path, section, "wikiPage", section),
             placementLimit: Integer(IniRead(path, section, "placementLimit", 0)),
+            placementFootprint: footprint,
             aliases: IniRead(path, section, "aliases", section)
         }
         result[entry.key] := entry
@@ -56,7 +59,36 @@ LabTowerResolve(towerName) {
     catalog := LabTowerCatalog()
     if catalog.Has(key)
         return catalog[key]
-    return {key: key, name: Trim(String(towerName)), wikiPage: Trim(String(towerName)), placementLimit: 0, aliases: towerName}
+    ; Unknown towers still get the game's common Average footprint as a visual fallback.
+    return {
+        key: key,
+        name: Trim(String(towerName)),
+        wikiPage: Trim(String(towerName)),
+        placementLimit: 0,
+        placementFootprint: 1.5,
+        aliases: towerName
+    }
+}
+
+LabTowerPlacementFootprint(towerName) {
+    entry := LabTowerResolve(towerName)
+    value := entry.placementFootprint
+    return IsNumber(value) && Number(value) > 0 ? Number(value) : 1.5
+}
+
+LabTowerFootprintLabel(value) {
+    value := Number(value)
+    if (value <= 1.0)
+        return "Small"
+    if (value <= 1.25)
+        return "Below average"
+    if (value <= 1.5)
+        return "Average"
+    if (value <= 1.75)
+        return "Above average"
+    if (value <= 2.0)
+        return "Large"
+    return "Very large"
 }
 
 LabTowerImageUsable(path) {
@@ -220,5 +252,6 @@ LabTowerPlacementMeta(document, placement) {
     limitText := entry.placementLimit = 1
         ? "Unique placement"
         : (entry.placementLimit > 1 ? "Placement " occurrence " of " entry.placementLimit : "Placement " occurrence)
-    return "Slot " placement.slot "  •  " limitText
+    footprint := LabTowerPlacementFootprint(rawTower)
+    return "Slot " placement.slot "  •  " limitText "`n" LabTowerFootprintLabel(footprint) " footprint (" footprint ")"
 }
