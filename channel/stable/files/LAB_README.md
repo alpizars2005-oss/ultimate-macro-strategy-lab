@@ -1,8 +1,8 @@
-# Ultimate Macro Strategy Lab 0.2.4
+# Ultimate Macro Strategy Lab 0.2.5
 
 Private experimental build based on Darksen's official Ultimate Macro 1.3.3.
 
-## Strategy Editor 0.2.4
+## Strategy Editor 0.2.5
 
 This build is a visual-polish and asset-reliability pass over the 0.2 editor.
 
@@ -28,7 +28,7 @@ This build is a visual-polish and asset-reliability pass over the 0.2 editor.
 
 The Lab reads `requiredTowers` and associates placements with a tower catalog.
 
-- Base/default tower portraits are cached on demand from the TDS Wiki.
+- Tower portrait sync now searches each tower's Gallery first and strongly prefers images whose filenames match the tower plus `Default` and `Icon`/`Render`/`Portrait`-style terms; only then does it fall back to the article thumbnail.
 - The selected placement shows portrait, display name, slot, X/Y and placement-limit metadata.
 - Towers with a placement limit of exactly 1 are shown without `#1`.
 - Multi-placement towers are displayed as `Tower #1`, `Tower #2`, etc.
