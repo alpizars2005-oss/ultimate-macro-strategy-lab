@@ -61,9 +61,12 @@ jobs:
               'lib/StrategyLab/StrategyEditorPlacements.ahk',
               'lib/StrategyLab/StrategyEditorMaps.ahk',
               'lib/StrategyLab/StrategyEditorWorkspace.ahk',
+              'lib/StrategyLab/StrategyCalibration.ahk',
               'lib/StrategyLab/MapLibrary.ahk',
               'lib/StrategyLab/TowerCatalog.ahk',
+              'submacros/lab_calibration_worker.ahk',
               'submacros/lab_assets.ps1',
+              'submacros/lab_update.ps1',
           }
           assert required <= targets, f'missing update targets: {sorted(required - targets)}'
           assert source_for['submacros/lab_assets.ps1'].endswith('submacros__lab_assets_v3.ps1')
@@ -76,6 +79,24 @@ jobs:
           workspace = (root / source_for['lib/StrategyLab/StrategyEditorWorkspace.ahk']).read_text(encoding='utf-8-sig')
           assert 'LabEditorHeaderLine.Move(20, 137, 960, 1)' in workspace
           assert 'LabEditorWorkspaceCanvasW := 646' in workspace
+
+          calibration = (root / source_for['submacros/lab_calibration_worker.ahk']).read_text(encoding='utf-8-sig')
+          assert 'TimeWhenStartedPlaying' in calibration
+          assert 'Gdip_BitmapFromScreen' in calibration
+          assert 'Gdip_SaveBitmapToFile(pBitmap, temp, 86)' in calibration
+          assert 'PlayStrategy()' in calibration
+
+          bridge = (root / source_for['lib/StrategyLab/StrategyCalibration.ahk']).read_text(encoding='utf-8-sig')
+          assert 'lab_calibration_worker.ahk' in bridge
+          assert 'ProcessExist(LabCalibrationWorkerPid)' in bridge
+
+          updater_ahk = (root / source_for['lib/StrategyLab/LabUpdater.ahk']).read_text(encoding='utf-8-sig')
+          assert '-LauncherPath' in updater_ahk
+          assert '-EntryScript' in updater_ahk
+
+          updater_ps1 = (root / source_for['submacros/lab_update.ps1']).read_text(encoding='utf-8-sig')
+          assert 'function Restart-StrategyLab' in updater_ps1
+          assert 'Main_Lab.ahk' in updater_ps1
 
       - name: Parse PowerShell helpers
         shell: pwsh
