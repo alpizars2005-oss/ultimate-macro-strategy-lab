@@ -1,4 +1,4 @@
-# Strategy Lab stable delivery map 0.3.8 editor marker + reward tracker pass
+# Strategy Lab stable delivery map 0.3.9 clean editor install
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 run_lab.bat|channel/stable/files/run_lab.bat|raw
@@ -20,6 +20,7 @@ lib/StrategyLab/MapLibrary.ahk|channel/stable/files/lib__StrategyLab__MapLibrary
 lib/StrategyLab/TowerCatalog.ahk|channel/stable/files/lib__StrategyLab__TowerCatalog.ahk|raw
 lib/StrategyLab/LabRewardCatalog.ahk|channel/stable/files/lib__StrategyLab__LabRewardCatalog.ahk|raw
 lib/StrategyLab/LabRewardTracker.ahk|channel/stable/files/lib__StrategyLab__LabRewardTracker.ahk|raw
+lib/StrategyLab/LabStatsTab.ahk|channel/stable/files/lib__StrategyLab__LabStatsTab.ahk|raw
 lib/StrategyLab/LabStrategyValidation.ahk|channel/stable/files/lib__StrategyLab__LabStrategyValidation.ahk|raw
 lib/StrategyLab/LabSafety.ahk|channel/stable/files/lib__StrategyLab__LabSafety.ahk|raw
 lib/StrategyLab/LabTelemetry.ahk|channel/stable/files/lib__StrategyLab__LabTelemetry.ahk|raw

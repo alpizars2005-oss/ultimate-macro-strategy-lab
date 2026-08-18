@@ -1,37 +1,12 @@
 #Requires AutoHotkey v2.0
 
-; Stable placement presentation layer.
-;
-; Rules:
-;   entry.ctrl = one small draggable marker HWND. Never resize it to footprint size.
-;   entry.ring = one transparent outline HWND sized to the placement footprint.
-;   unique placement-limit-1 towers may replace the text marker with ONE tiny portrait.
-;
-; This deliberately avoids stacking duplicate markers or creating live-game style cyan
-; halos. The neutral outline is a tiny shipped asset and the default mode is Selected.
+; 0.3.9 marker portrait helper.
+; Footprint rendering now lives entirely in StrategyEditorPlacements. This module has
+; exactly one job: if a placement-limit-1 tower has a real cached portrait, replace the
+; existing text marker HWND with one Picture HWND. It never creates a second marker,
+; never touches ring geometry and never changes layer state.
 
 global LabSimpleFootprintsTickMs := 750
-global LabSimpleFootprintsLastMode := ""
-global LabSimpleFootprintGuidePath := A_ScriptDir "\Resources\StrategyLab\Towers\footprint-guide.png"
-
-; Top-level assignment is global in AHK v2. StrategyEditorPlacements initializes this
-; to "all" earlier in the include order; override it once here before a strategy loads.
-LabEditorRingMode := "selected"
-
-LabSimpleFootprintsInstallTemplate() {
-    global LabEditorRingTemplatePath, LabSimpleFootprintGuidePath
-    if FileExist(LabSimpleFootprintGuidePath)
-        LabEditorRingTemplatePath := LabSimpleFootprintGuidePath
-}
-
-LabSimpleFootprintButtonText() {
-    global LabEditorRingMode
-    if (LabEditorRingMode = "selected")
-        return "Footprint: 1"
-    if (LabEditorRingMode = "off")
-        return "Footprint: Off"
-    return "Footprint: All"
-}
 
 LabSimpleFootprintsPortraitFor(entry) {
     global LabEditorDoc
@@ -46,9 +21,6 @@ LabSimpleFootprintsPortraitFor(entry) {
     if (tower.placementLimit != 1)
         return ""
 
-    ; Never use the generic placeholder as an in-map marker. Wait for Sync Assets to
-    ; cache the real tower art, then reuse the square preview already made for the
-    ; selected-unit panel. That keeps these marker images tiny and local.
     cached := LabTowerCachedPortraitPath(towerName)
     if (cached = "")
         return ""
@@ -60,7 +32,7 @@ LabSimpleFootprintsPortraitFor(entry) {
 LabSimpleFootprintsUpgradeUniqueMarker(index, entry) {
     global MainGui, LabEditorDoc, LabEditorMarkerByHwnd, LabEditorSelectedRow
 
-    if !IsObject(LabEditorDoc) || !IsObject(entry)
+    if !IsObject(LabEditorDoc) || !IsObject(entry) || !IsObject(entry.ctrl)
         return false
 
     ready := false
@@ -68,9 +40,9 @@ LabSimpleFootprintsUpgradeUniqueMarker(index, entry) {
     if ready
         return false
 
-    checkedNonUnique := false
-    try checkedNonUnique := entry.labUniquePortraitNotApplicable
-    if checkedNonUnique
+    notApplicable := false
+    try notApplicable := entry.labUniquePortraitNotApplicable
+    if notApplicable
         return false
 
     towerName := LabEditorDoc.TowerNameForSlot(entry.placement.slot)
@@ -87,13 +59,7 @@ LabSimpleFootprintsUpgradeUniqueMarker(index, entry) {
     if (portrait = "")
         return false
 
-    if !IsObject(entry.ctrl) || !IsObject(MainGui)
-        return false
-
     point := StrategyEditorPlacementPoint(entry.placement)
-    ; Keep the exact same geometry as ordinary markers. This is important: selection,
-    ; drag and zoom have one authoritative sizing path (18px / 22px selected), so a
-    ; background timer can never fight the interaction layer again.
     size := index = LabEditorSelectedRow ? 22 : 18
     wasVisible := false
     oldHwnd := 0
@@ -115,13 +81,12 @@ LabSimpleFootprintsUpgradeUniqueMarker(index, entry) {
         return false
     }
 
-    ; Replace, never stack. entry.ctrl remains the single authoritative marker HWND
-    ; used by click/drag hit-testing.
-    try entry.ctrl.Visible := false
-    if oldHwnd {
+    ; Replace, never stack. Update hit testing before destroying the old HWND.
+    if oldHwnd
         try LabEditorMarkerByHwnd.Delete(oldHwnd)
+    try entry.ctrl.Visible := false
+    if oldHwnd
         try DllCall("DestroyWindow", "Ptr", oldHwnd)
-    }
 
     entry.ctrl := marker
     entry.labUniquePortraitReady := true
@@ -130,53 +95,23 @@ LabSimpleFootprintsUpgradeUniqueMarker(index, entry) {
     return true
 }
 
-LabSimpleFootprintsStyleEntry(entry) {
-    global LabSimpleFootprintGuidePath
-    if !IsObject(entry)
-        return
-
-    guideReady := false
-    try guideReady := entry.labFootprintGuideReady
-    if !guideReady && IsObject(entry.ring) && FileExist(LabSimpleFootprintGuidePath) {
-        try {
-            ; Replace the old cyan GDI template in-place. The ring remains the same HWND,
-            ; so drag/zoom never creates another layer on top of the existing guide.
-            entry.ring.Value := LabSimpleFootprintGuidePath
-            entry.labFootprintGuideReady := true
-        }
-    }
-}
-
 LabSimpleFootprintsApply(*) {
-    global LabEditorDoc, LabEditorMarkerCtrls, LabEditorRingsBtn
-    global LabEditorRingMode, LabSimpleFootprintsLastMode
+    global LabEditorDoc, LabEditorMarkerCtrls
 
     if !IsObject(LabEditorDoc) || !IsObject(LabEditorMarkerCtrls)
         return
 
-    changedMarker := false
+    changed := false
     for index, entry in LabEditorMarkerCtrls {
-        if !IsObject(entry)
-            continue
-        LabSimpleFootprintsStyleEntry(entry)
         if LabSimpleFootprintsUpgradeUniqueMarker(index, entry)
-            changedMarker := true
+            changed := true
     }
 
-    if changedMarker {
-        ; One synchronization pass after an HWND replacement. No per-frame rebuilds.
+    if changed {
         try StrategyEditorRefreshMarkerSelection()
         try StrategyEditorApplyLayer()
     }
-
-    if (LabSimpleFootprintsLastMode != LabEditorRingMode) {
-        LabSimpleFootprintsLastMode := LabEditorRingMode
-        if IsObject(LabEditorRingsBtn)
-            try LabEditorRingsBtn.Text := LabSimpleFootprintButtonText()
-    }
 }
 
-; Install before any strategy is loaded so BuildMarkers uses the neutral guide from its
-; very first frame. The timer only handles lazy unique portraits and does no rendering.
-LabSimpleFootprintsInstallTemplate()
+; Lazy cached portraits are cosmetic. A failed/missing Wiki asset never blocks Editor.
 SetTimer(LabSimpleFootprintsApply, LabSimpleFootprintsTickMs)

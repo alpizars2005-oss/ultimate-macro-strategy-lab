@@ -12,7 +12,7 @@ function Log([string]$Text) {
 }
 
 function Write-Utf8NoBom([string]$Path,[string]$Text) {
-    [IO.File]::WriteAllText($Path, $Text, (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($Path,$Text,(New-Object Text.UTF8Encoding($false)))
 }
 
 function Normalize-InstallDir([string]$Value) {
@@ -28,17 +28,17 @@ function Backup-Main([string]$Main,[string]$Reason) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $backup = $Main + '.preflight-' + $stamp + '.bak'
     Copy-Item -LiteralPath $Main -Destination $backup -Force
-    Log ("BACKUP {0}: {1}" -f $Reason, $backup)
+    Log ("BACKUP {0}: {1}" -f $Reason,$backup)
     return $backup
 }
 
 function Repair-StrayClear([string]$Text,[string]$Main,[ref]$Changed) {
     $pattern = '(?ms)^(?<indent>[ \t]*)Clear[ \t]*\r?\n(?=[ \t]*colors[ \t]*:=[ \t]*Map\(\)[ \t]*\r?\n[ \t]*colors\["Background"\])'
-    $matches = [regex]::Matches($Text, $pattern)
+    $matches = [regex]::Matches($Text,$pattern)
     if ($matches.Count -gt 1) { throw "found $($matches.Count) candidate stray Clear lines; refusing ambiguous repair." }
     if ($matches.Count -eq 1) {
         Backup-Main $Main 'stray-Clear repair' | Out-Null
-        $Text = [regex]::Replace($Text, $pattern, '', 1)
+        $Text = [regex]::Replace($Text,$pattern,'',1)
         $Changed.Value = $true
         Log 'REPAIRED stray Clear parser line.'
     }
@@ -47,21 +47,14 @@ function Repair-StrayClear([string]$Text,[string]$Main,[ref]$Changed) {
 
 function Install-RemoteBoundary([string]$Text,[string]$Main,[ref]$Changed) {
     $original = $Text
-
-    # Remove any Strategy Lab boundary block from older 0.3.x builds first. Some local
-    # installations reached the "contains hook text" state even when the block itself
-    # was incomplete, which prevented the old preflight from repairing it.
     $marked = '(?ms)^[ \t]*; <StrategyLabRemoteBoundary>[ \t]*\r?\n.*?^[ \t]*; </StrategyLabRemoteBoundary>[ \t]*\r?\n?'
-    $Text = [regex]::Replace($Text, $marked, '')
+    $Text = [regex]::Replace($Text,$marked,'')
 
     $legacy = '(?ms)^[ \t]*stratName[ \t]*:=[ \t]*IniRead\(StateFile,[ \t]*"State",[ \t]*"Strategy",[ \t]*""\)[ \t]*\r?\n[ \t]*; Strategy Lab remote commands are consumed only between matches\.[ \t]*\r?\n[ \t]*labRemoteAction[ \t]*:=[ \t]*LabRemoteConsumeBetweenMatches\(&switched,[ \t]*&stratName\)[ \t]*\r?\n[ \t]*if[ \t]*\(labRemoteAction[ \t]*=[ \t]*"stop"\)[ \t]*\r?\n[ \t]+return[ \t]*\r?\n?'
-    $Text = [regex]::Replace($Text, $legacy, '')
+    $Text = [regex]::Replace($Text,$legacy,'')
 
-    # Ultimate Macro 1.3.x/2.x keeps one stable "switched := false" at the beginning
-    # of RunStrategy. The hook is deliberately before rotation logic and never touches
-    # PlayStrategy(), so a Discord switch is consumed only at a run boundary.
     $pattern = '(?m)^(?<indent>[ \t]*)switched[ \t]*:=[ \t]*false[ \t]*\r?$'
-    $matches = [regex]::Matches($Text, $pattern)
+    $matches = [regex]::Matches($Text,$pattern)
     if ($matches.Count -ne 1) {
         Log ("WARN remote boundary not installed: expected exactly one 'switched := false', found {0}." -f $matches.Count)
         return $original
@@ -69,7 +62,7 @@ function Install-RemoteBoundary([string]$Text,[string]$Main,[ref]$Changed) {
 
     $m = $matches[0]
     $indent = $m.Groups['indent'].Value
-    $block = $m.Value.TrimEnd("`r", "`n") + "`r`n" +
+    $block = $m.Value.TrimEnd("`r","`n") + "`r`n" +
         $indent + '; <StrategyLabRemoteBoundary>' + "`r`n" +
         $indent + 'stratName := IniRead(StateFile, "State", "Strategy", "")' + "`r`n" +
         $indent + '; Strategy Lab remote commands are consumed only between matches.' + "`r`n" +
@@ -78,9 +71,8 @@ function Install-RemoteBoundary([string]$Text,[string]$Main,[ref]$Changed) {
         $indent + '    return' + "`r`n" +
         $indent + '; </StrategyLabRemoteBoundary>'
 
-    $Text = $Text.Substring(0, $m.Index) + $block + $Text.Substring($m.Index + $m.Length)
-
-    $count = [regex]::Matches($Text, 'LabRemoteConsumeBetweenMatches\(&switched,[ \t]*&stratName\)').Count
+    $Text = $Text.Substring(0,$m.Index) + $block + $Text.Substring($m.Index + $m.Length)
+    $count = [regex]::Matches($Text,'LabRemoteConsumeBetweenMatches\(&switched,[ \t]*&stratName\)').Count
     if ($count -ne 1) {
         Log ("WARN remote boundary normalization produced {0} consumers; refusing change." -f $count)
         return $original
@@ -96,38 +88,32 @@ function Install-RemoteBoundary([string]$Text,[string]$Main,[ref]$Changed) {
     return $Text
 }
 
-function Install-WebhookRemoteShortcut([string]$Text,[string]$Main,[ref]$Changed) {
-    $event = 'Tab4_Title.OnEvent("Click", LabRemoteLaunchSettings)'
-    if ($Text.Contains($event)) {
-        Log 'OK Discord Webhook title remote shortcut already installed.'
-        return $Text
+function Remove-ObsoleteTitleRemoteShortcut([string]$Text,[string]$Main,[ref]$Changed) {
+    # 0.3.7+ has a real Discord Remote Button. Binding the existing Webhook Text title
+    # to a second callback can open DiscordSettings and Lab Remote simultaneously.
+    $pattern = '(?m)^[ \t]*Tab4_Title\.OnEvent\("Click",[ \t]*LabRemoteLaunchSettings\)[ \t]*\r?\n?'
+    $matches = [regex]::Matches($Text,$pattern)
+    if ($matches.Count -gt 0) {
+        Backup-Main $Main 'remove obsolete Webhook title remote shortcut' | Out-Null
+        $Text = [regex]::Replace($Text,$pattern,'')
+        $Changed.Value = $true
+        Log ("REMOVED {0} obsolete Webhook title remote shortcut(s)." -f $matches.Count)
     }
-
-    $pattern = '(?m)^(?<indent>[ \t]*)global[ \t]+Tab4_Title[ \t]*:=[^\r\n]*"Discord Webhook"[^\r\n]*\r?$'
-    $matches = [regex]::Matches($Text, $pattern)
-    if ($matches.Count -ne 1) {
-        Log ("WARN Webhook remote shortcut not installed: expected one Discord Webhook title, found {0}." -f $matches.Count)
-        return $Text
-    }
-
-    $m = $matches[0]
-    $indent = $m.Groups['indent'].Value
-    $replacement = $m.Value.TrimEnd("`r", "`n") + "`r`n" + $indent + $event
-    Backup-Main $Main 'Webhook remote shortcut install' | Out-Null
-    $Text = $Text.Substring(0, $m.Index) + $replacement + $Text.Substring($m.Index + $m.Length)
-    $Changed.Value = $true
-    Log 'INSTALLED Discord Webhook title -> Strategy Lab Remote settings shortcut.'
     return $Text
 }
 
 function Verify-LabModules([string]$InstallRoot) {
     $required = @(
         'lib\StrategyLab\StrategyEditorTab.ahk',
+        'lib\StrategyLab\StrategyEditorPlacements.ahk',
+        'lib\StrategyLab\LabSimpleFootprints.ahk',
+        'lib\StrategyLab\LabStatsTab.ahk',
         'lib\StrategyLab\LabSafety.ahk',
         'lib\StrategyLab\LabStrategyValidation.ahk',
         'lib\StrategyLab\LabTelemetry.ahk',
+        'lib\StrategyLab\LabRewardCatalog.ahk',
+        'lib\StrategyLab\LabRewardTracker.ahk',
         'lib\StrategyLab\LabRemoteGate.ahk',
-        'lib\StrategyLab\LabSimpleFootprints.ahk',
         'submacros\lab_fingerprint.ps1',
         'submacros\lab_discord_worker.ps1',
         'submacros\lab_remote_settings.ps1'
@@ -136,16 +122,13 @@ function Verify-LabModules([string]$InstallRoot) {
     foreach ($relative in $required) {
         if (!(Test-Path -LiteralPath (Join-Path $InstallRoot $relative) -PathType Leaf)) { $missing += $relative }
     }
-    if ($missing.Count -gt 0) {
-        Log ('WARN optional 0.3 modules missing locally: ' + ($missing -join ', ') + '. Run the Strategy Lab updater.')
-    } else {
-        Log 'OK Strategy Lab 0.3 module set present.'
-    }
+    if ($missing.Count -gt 0) { throw ('Required Strategy Lab modules are missing: ' + ($missing -join ', ')) }
+    Log 'OK Strategy Lab required module set present.'
 }
 
 try {
     $installRoot = Normalize-InstallDir $InstallDir
-    Log ("INFO InstallDir raw=<{0}> normalized=<{1}>" -f $InstallDir, $installRoot)
+    Log ("INFO InstallDir raw=<{0}> normalized=<{1}>" -f $InstallDir,$installRoot)
 
     $main = Join-Path $installRoot 'Main_Lab.ahk'
     if (!(Test-Path -LiteralPath $main -PathType Leaf)) {
@@ -159,21 +142,20 @@ try {
         exit 3
     }
 
+    Verify-LabModules $installRoot
+
     $changed = $false
     $text = Repair-StrayClear $text $main ([ref]$changed)
+    $text = Remove-ObsoleteTitleRemoteShortcut $text $main ([ref]$changed)
 
     $remoteGate = Join-Path $installRoot 'lib\StrategyLab\LabRemoteGate.ahk'
     if (Test-Path -LiteralPath $remoteGate -PathType Leaf) {
         $text = Install-RemoteBoundary $text $main ([ref]$changed)
-        $text = Install-WebhookRemoteShortcut $text $main ([ref]$changed)
-    } else {
-        Log 'INFO remote bridge not installed yet; skipping remote Main_Lab hooks.'
     }
 
     if ($changed) { Write-Utf8NoBom $main $text }
     else { Log 'OK no Main_Lab source repair required.' }
 
-    Verify-LabModules $installRoot
     exit 0
 } catch {
     Log ('ERROR preflight exception: ' + $_.Exception.Message)
