@@ -22,7 +22,6 @@ StrategyEditorBuildLayers() {
         }
     }
 
-    ; Preserve a user's active filter if this list is rebuilt after an async refresh.
     wanted := LabEditorLayer
     wantedIndex := 1
     for index, option in options {
@@ -166,6 +165,7 @@ StrategyEditorApplyLayer() {
 
 StrategyEditorLayerChanged(*) {
     global LabEditorLayerCtrl, LabEditorLayer, LabEditorLayerOptions, LabEditorDoc, LabEditorSelectedRow
+    global LabEditorListRowMap
     if !IsObject(LabEditorDoc)
         return
 
