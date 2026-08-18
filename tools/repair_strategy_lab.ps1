@@ -8,6 +8,7 @@ $RepoUrl = 'https://github.com/alpizars2005-oss/ultimate-macro-strategy-lab.git'
 $repairRoot = Join-Path $env:LOCALAPPDATA 'Ultimate_Macro\StrategyLabRepair'
 $updaterRoot = Join-Path $env:LOCALAPPDATA 'Ultimate_Macro\StrategyLabUpdater'
 $cacheRepo = Join-Path $updaterRoot 'repo'
+$runtimeRoot = Join-Path $env:APPDATA 'Ultimate_Macro\StrategyEditor'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $backupRoot = Join-Path $repairRoot "backups\$stamp"
 $logPath = Join-Path $repairRoot 'repair.log'
@@ -26,8 +27,6 @@ function Run-Git([string[]]$Arguments, [switch]$Visible) {
     $psi.CreateNoWindow = !$Visible
     $psi.RedirectStandardOutput = !$Visible
     $psi.RedirectStandardError = !$Visible
-    # .NET ProcessStartInfo on Windows PowerShell has no ArgumentList collection. Quote
-    # each value ourselves; these arguments are controlled by this script, not user input.
     $quoted = foreach ($arg in $Arguments) {
         if ($arg -match '[\s"]') { '"' + ($arg -replace '"','\"') + '"' } else { $arg }
     }
@@ -55,7 +54,7 @@ function Refresh-PrivateCache {
         Log 'CACHE cloning private repository through Git Credential Manager.'
         $code = Run-Git @('clone','--depth','1','--branch','main',$RepoUrl,$cacheRepo) -Visible
         if ($code -ne 0 -or !(Test-Path -LiteralPath (Join-Path $cacheRepo '.git') -PathType Container)) {
-            throw "Private repository clone failed (git exit $code). Complete any GitHub sign-in window and run the repair again."
+            throw "Private repository clone failed (git exit $code). Complete any GitHub sign-in window and run this repair again."
         }
         return
     }
@@ -99,6 +98,42 @@ function Stop-RunningLab([string]$Root) {
     }
 }
 
+function Stop-LabWorkers([string]$Root) {
+    try {
+        $normalized = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+        $workers = Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+            $_.Name -match '^powershell(\.exe)?$' -and $_.CommandLine -and
+            $_.CommandLine.IndexOf($normalized,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+            ($_.CommandLine.IndexOf('lab_discord_worker.ps1',[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+             $_.CommandLine.IndexOf('lab_remote_settings.ps1',[StringComparison]::OrdinalIgnoreCase) -ge 0)
+        }
+        foreach ($p in $workers) {
+            Log ("Stopping stale Strategy Lab worker PID {0}" -f $p.ProcessId)
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+        Log ('INFO could not enumerate Lab PowerShell workers: ' + $_.Exception.Message)
+    }
+}
+
+function Clear-StaleRuntimeState {
+    $paths = @(
+        (Join-Path $env:APPDATA 'Ultimate_Macro\remote_command.ini'),
+        (Join-Path $runtimeRoot 'lab_remote_command.ini'),
+        (Join-Path $runtimeRoot 'ui\placement-footprint-ring.png')
+    )
+    foreach ($path in $paths) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            try {
+                Remove-Item -LiteralPath $path -Force
+                Log ('CLEAN removed stale runtime file: ' + $path)
+            } catch {
+                Log ('WARN could not remove stale runtime file: ' + $path + ' :: ' + $_.Exception.Message)
+            }
+        }
+    }
+}
+
 try {
     $InstallDir = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($InstallDir.Trim()).Trim('"'))
     if (!(Test-Path -LiteralPath $InstallDir -PathType Container)) { throw "Install directory does not exist: $InstallDir" }
@@ -108,6 +143,8 @@ try {
 
     Log ("BEGIN repair install={0}" -f $InstallDir)
     Stop-RunningLab $InstallDir
+    Stop-LabWorkers $InstallDir
+    Clear-StaleRuntimeState
     Refresh-PrivateCache
 
     $channel = Join-Path $cacheRepo 'channel\stable'
@@ -176,6 +213,14 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Preflight failed with exit code $LASTEXITCODE. See %APPDATA%\Ultimate_Macro\StrategyEditor\preflight.log" }
     }
 
+    # Exercise the exact Windows PowerShell/WinForms code path which previously crashed
+    # Discord Remote with System.Object[].op_Subtraction before we declare recovery good.
+    $remoteSettings = Join-Path $InstallDir 'submacros\lab_remote_settings.ps1'
+    if (Test-Path -LiteralPath $remoteSettings -PathType Leaf) {
+        & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $remoteSettings -InstallDir $InstallDir -SelfTest
+        if ($LASTEXITCODE -ne 0) { throw "Discord Remote settings self-test failed with exit code $LASTEXITCODE. See %APPDATA%\Ultimate_Macro\StrategyEditor\remote-settings.log" }
+    }
+
     $probe = Join-Path $InstallDir 'submacros\lab_syntax_probe.ps1'
     if (!(Test-Path -LiteralPath $probe -PathType Leaf)) { throw 'Recovery installed no syntax probe; stable channel is incomplete.' }
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $probe -InstallDir $InstallDir
@@ -183,11 +228,10 @@ try {
         throw "Integrated AutoHotkey syntax check still failed. See %APPDATA%\Ultimate_Macro\StrategyEditor\syntax-probe.log. Backups are in $backupRoot"
     }
 
-    # Mark recovered version only after preflight AND the real bundled AutoHotkey parser pass.
     [IO.File]::WriteAllText((Join-Path $InstallDir 'lab_version.ini'), "[Lab]`r`nVersion=$stableVersion`r`n", (New-Object Text.UTF8Encoding($false)))
 
     Log ("SUCCESS repaired to {0}; files={1}" -f $stableVersion,$written.Count)
-    Write-Host "`nSUCCESS: Strategy Lab $stableVersion passed the integrated AutoHotkey syntax check." -ForegroundColor Green
+    Write-Host "`nSUCCESS: Strategy Lab $stableVersion passed AutoHotkey + Discord Remote recovery checks." -ForegroundColor Green
     Write-Host "Backup: $backupRoot" -ForegroundColor DarkGray
 
     if (!$NoLaunch) {

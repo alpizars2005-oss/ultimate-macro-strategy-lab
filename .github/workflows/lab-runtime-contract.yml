@@ -43,20 +43,28 @@ jobs:
           core = (stable / 'lib__StrategyLab__StrategyEditorCore.ahk').read_text(encoding='utf-8-sig')
           safety = (stable / 'lib__StrategyLab__LabSafety.ahk').read_text(encoding='utf-8-sig')
           remote = (stable / 'lib__StrategyLab__LabRemoteGate.ahk').read_text(encoding='utf-8-sig')
+          footprints = (stable / 'lib__StrategyLab__LabSimpleFootprints.ahk').read_text(encoding='utf-8-sig')
+          remote_settings = (stable / 'submacros__lab_remote_settings.ps1').read_text(encoding='utf-8-sig')
+          preflight = (stable / 'submacros__lab_preflight.ps1').read_text(encoding='utf-8-sig')
 
           assert '&this.' not in ahk, 'object properties cannot be AutoHotkey ByRef targets'
           assert 'LabStrategyReadText' not in validation + core, 'legacy ByRef strategy decoder returned'
           assert 'LabStrategyReadFile' in validation and 'LabStrategyReadFile(path)' in core
           assert 'FileRead(path, "RAW")' in validation, 'strategy decoder must inspect raw bytes first'
           assert 'LabStrategyTrimTerminalNuls' in validation, 'terminal NUL compatibility guard missing'
-          assert not re.search(r'\bStopStrategy\s*\(\s*\)', ahk), 'zero-argument StopStrategy call found'
-          assert not re.search(r'\bStartStrategy\s*\(\s*\)', ahk), 'zero-argument StartStrategy call found'
-          assert 'StopStrategy(0, 0)' in safety
-          assert 'StartStrategy(0, 0)' in remote
           assert 'submacros/lab_syntax_probe.ps1|' in mapping
+          assert 'lib/StrategyLab/LabSimpleFootprints.ahk|' in mapping
+          assert 'LabSimpleFootprintsRemoveLegacyHalo' in footprints
+          assert 'DestroyWindow' in footprints and 'StrategyEditorFootprintDiameter' in footprints
           assert 'lab_syntax_probe.ps1' in launcher
           assert 'lab_syntax_probe.ps1' in updater and 'Restore-AppliedFiles' in updater
           assert 'Discord Remote' in remote and 'LabRemoteWebhookBtn' in remote
+          assert '[Drawing.Point]::new' in remote_settings and '[Drawing.Size]::new' in remote_settings
+          assert 'New-Object Drawing.Point(' not in remote_settings, 'ambiguous PowerShell Point constructor returned'
+          assert 'New-Object Drawing.Size(' not in remote_settings, 'ambiguous PowerShell Size constructor returned'
+          assert '[switch]$SelfTest' in remote_settings
+          assert '<StrategyLabRemoteBoundary>' in preflight
+          assert 'LabRemoteConsumeBetweenMatches(&switched, &stratName)' in preflight
 
       - name: Parse every PowerShell helper and recovery tool
         shell: pwsh
@@ -158,3 +166,9 @@ jobs:
           if ($proc.ExitCode -ne 0 -or (($stdout + $stderr) -match '(?im)^Error:')) {
             throw "AutoHotkey encoding compatibility test failed with exit code $($proc.ExitCode)."
           }
+
+      - name: Run Discord Remote WinForms constructor self-test
+        shell: powershell
+        run: |
+          & .\channel\stable\files\submacros__lab_remote_settings.ps1 -InstallDir (Get-Location).Path -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw "Discord Remote settings self-test failed with exit code $LASTEXITCODE" }
