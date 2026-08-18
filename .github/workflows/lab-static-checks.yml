@@ -56,7 +56,6 @@ jobs:
               assert mode in {'raw', 'base64'}, f'bad mode: {mode}'
 
           required = {
-              'run_lab.bat',
               'lib/StrategyLab/StrategyEditorTab.ahk',
               'lib/StrategyLab/StrategyEditorUi.ahk',
               'lib/StrategyLab/StrategyEditorPlacements.ahk',
@@ -69,7 +68,6 @@ jobs:
               'submacros/lab_calibration_worker.ahk',
               'submacros/lab_assets.ps1',
               'submacros/lab_update.ps1',
-              'submacros/lab_preflight.ps1',
           }
           assert required <= targets, f'missing update targets: {sorted(required - targets)}'
           assert source_for['submacros/lab_assets.ps1'].endswith('submacros__lab_assets_v3.ps1')
@@ -78,11 +76,14 @@ jobs:
           assert 'LabEditorLayerOptions' in placements
           assert 'LabEditorListRowMap' in placements
           assert 'StrategyEditorRefreshLayerList' in placements
+          assert 'StrategyEditorRingImagePath' in placements
+          assert 'GdipDrawEllipse' in placements
+          assert 'CreateEllipticRgn' in placements
+          assert 'Rings: All' in placements
 
-          maps = (root / source_for['lib/StrategyLab/StrategyEditorMaps.ahk']).read_text(encoding='utf-8-sig')
-          assert 'one-frame black' in maps
-          assert 'LabEditorSnapshot.Value := renderPath' in maps
-          assert 'LabEditorSnapshot.Value := ""\n        LabEditorSnapshot.Value := renderPath' not in maps
+          ui = (root / source_for['lib/StrategyLab/StrategyEditorUi.ahk']).read_text(encoding='utf-8-sig')
+          assert 'LabEditorRingsBtn' in ui
+          assert 'StrategyEditorToggleRings' in ui
 
           workspace = (root / source_for['lib/StrategyLab/StrategyEditorWorkspace.ahk']).read_text(encoding='utf-8-sig')
           assert 'LabEditorHeaderLine.Move(20, 137, 960, 1)' in workspace
@@ -90,6 +91,7 @@ jobs:
           assert 'SELECTED UNIT' in workspace
           assert 'PLACEMENTS' in workspace
           assert 'StrategyEditorRenderBackgroundBuffered()' in workspace
+          assert 'LabEditorRingsBtn.Move(412, 177, 92, 24)' in workspace
 
           interaction = (root / source_for['lib/StrategyLab/StrategyEditorInteraction.ahk']).read_text(encoding='utf-8-sig')
           assert 'StrategyEditorRenderBackgroundBuffered' in interaction
@@ -100,6 +102,13 @@ jobs:
           assert 'LabTowerPreparePreview' in towers
           assert 'canvasSize := 320' in towers
           assert 'scale := Min(usable / sourceW, usable / sourceH)' in towers
+          assert 'placementFootprint' in towers
+          assert 'LabTowerPlacementFootprint' in towers
+
+          tower_catalog = (root / source_for['Resources/StrategyLab/Towers/catalog.ini']).read_text(encoding='utf-8-sig')
+          assert 'placementFootprint=1.5' in tower_catalog
+          assert '[Operator]' in tower_catalog
+          assert '[Warden]' in tower_catalog
 
           calibration = (root / source_for['submacros/lab_calibration_worker.ahk']).read_text(encoding='utf-8-sig')
           assert 'TimeWhenStartedPlaying' in calibration
@@ -119,22 +128,12 @@ jobs:
           assert 'function Restart-StrategyLab' in updater_ps1
           assert 'Main_Lab.ahk' in updater_ps1
 
-          preflight = (root / source_for['submacros/lab_preflight.ps1']).read_text(encoding='utf-8-sig')
-          assert 'stray Clear parser line' in preflight
-          assert 'colors\\["Background"\\]' in preflight
-          assert '.preflight-' in preflight
-
-          launcher = (root / source_for['run_lab.bat']).read_text(encoding='utf-8-sig')
-          assert 'lab_preflight.ps1' in launcher
-          assert 'AutoHotkey64.exe' in launcher
-
       - name: Parse PowerShell helpers
         shell: pwsh
         run: |
           $files = @(
             'channel/stable/files/submacros__lab_assets_v3.ps1',
-            'channel/stable/files/submacros__lab_update.ps1',
-            'channel/stable/files/submacros__lab_preflight.ps1'
+            'channel/stable/files/submacros__lab_update.ps1'
           )
           foreach ($file in $files) {
             $tokens = $null
