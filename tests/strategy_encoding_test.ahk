@@ -24,7 +24,10 @@ try {
     FileAppend(baseText Chr(0), fixtures[6].Path, "UTF-16-RAW")
 
     for fixture in fixtures {
-        result := LabStrategyValidate(fixture.Path)
+        try result := LabStrategyValidate(fixture.Path)
+        catch Error as fixtureErr {
+            throw Error(fixture.Name ": " fixtureErr.Message)
+        }
         if (result.Encoding != fixture.Encoding)
             throw Error(fixture.Name ": expected encoding " fixture.Encoding ", got " result.Encoding)
         if (result.TerminalNuls != fixture.TerminalNuls)
