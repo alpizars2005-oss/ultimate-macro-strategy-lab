@@ -1,0 +1,102 @@
+name: Strategy Lab runtime contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'channel/stable/files/**'
+      - 'channel/stable/files.map'
+      - 'tools/repair_strategy_lab.ps1'
+      - 'tests/ahk_contract_harness.ahk'
+      - '.github/workflows/lab-runtime-contract.yml'
+  pull_request:
+    paths:
+      - 'channel/stable/files/**'
+      - 'channel/stable/files.map'
+      - 'tools/repair_strategy_lab.ps1'
+      - 'tests/ahk_contract_harness.ahk'
+      - '.github/workflows/lab-runtime-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject known AutoHotkey compatibility hazards
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          stable = Path('channel/stable/files')
+          ahk = '\n'.join(p.read_text(encoding='utf-8-sig') for p in stable.glob('*.ahk'))
+          mapping = Path('channel/stable/files.map').read_text(encoding='utf-8')
+          launcher = (stable / 'run_lab.bat').read_text(encoding='utf-8-sig')
+          updater = (stable / 'submacros__lab_update.ps1').read_text(encoding='utf-8-sig')
+          validation = (stable / 'lib__StrategyLab__LabStrategyValidation.ahk').read_text(encoding='utf-8-sig')
+          core = (stable / 'lib__StrategyLab__StrategyEditorCore.ahk').read_text(encoding='utf-8-sig')
+          safety = (stable / 'lib__StrategyLab__LabSafety.ahk').read_text(encoding='utf-8-sig')
+          remote = (stable / 'lib__StrategyLab__LabRemoteGate.ahk').read_text(encoding='utf-8-sig')
+
+          assert '&this.' not in ahk, 'object properties cannot be AutoHotkey ByRef targets'
+          assert 'LabStrategyReadText' not in validation + core, 'legacy ByRef strategy decoder returned'
+          assert 'LabStrategyReadFile' in validation and 'LabStrategyReadFile(path)' in core
+          assert not re.search(r'\bStopStrategy\s*\(\s*\)', ahk), 'zero-argument StopStrategy call found'
+          assert not re.search(r'\bStartStrategy\s*\(\s*\)', ahk), 'zero-argument StartStrategy call found'
+          assert 'StopStrategy(0, 0)' in safety
+          assert 'StartStrategy(0, 0)' in remote
+          assert 'submacros/lab_syntax_probe.ps1|' in mapping
+          assert 'lab_syntax_probe.ps1' in launcher
+          assert 'lab_syntax_probe.ps1' in updater and 'Restore-AppliedFiles' in updater
+          assert 'Discord Remote' in remote and 'LabRemoteWebhookBtn' in remote
+
+      - name: Parse every PowerShell helper and recovery tool
+        shell: pwsh
+        run: |
+          $files = @(
+            'channel/stable/files/submacros__lab_assets_v3.ps1',
+            'channel/stable/files/submacros__lab_update.ps1',
+            'channel/stable/files/submacros__lab_preflight.ps1',
+            'channel/stable/files/submacros__lab_syntax_probe.ps1',
+            'channel/stable/files/submacros__lab_fingerprint.ps1',
+            'channel/stable/files/submacros__lab_discord_worker.ps1',
+            'channel/stable/files/submacros__lab_remote_settings.ps1',
+            'tools/repair_strategy_lab.ps1'
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              Write-Host "PowerShell parse failure: $file" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Error $_.Message }
+              exit 1
+            }
+          }
+
+  autohotkey-parser:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned AutoHotkey v2 parser
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.19/AutoHotkey_2.0.19.zip'
+          Invoke-WebRequest -Uri $url -OutFile ahk.zip
+          Expand-Archive -Path ahk.zip -DestinationPath ahk -Force
+          $exe = Get-ChildItem -Path ahk -Recurse -Filter AutoHotkey64.exe | Select-Object -First 1
+          if (!$exe) { throw 'AutoHotkey64.exe not found in release archive.' }
+          "AHK_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Parse Strategy Lab against upstream function signatures
+        shell: pwsh
+        run: |
+          $output = & $env:AHK_EXE /ErrorStdOut (Resolve-Path 'tests/ahk_contract_harness.ahk') 2>&1
+          $code = $LASTEXITCODE
+          if ($output) { $output | ForEach-Object { Write-Host $_ } }
+          if ($code -ne 0) { throw "AutoHotkey parser exited with code $code" }
