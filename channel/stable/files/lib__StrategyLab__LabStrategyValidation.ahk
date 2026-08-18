@@ -1,8 +1,33 @@
 #Requires AutoHotkey v2.0
 
 ; Defensive validation inspired by the strict-load contract in Macro-Recorder-JSON.
-; The editor still preserves unknown/future strategy actions; this only rejects files
-; that are clearly malformed or unreasonably large before they enter the visual editor.
+; Ultimate Macro strategies may exist as UTF-8 or UTF-16 depending on the writer/
+; Windows environment. Detect the text encoding before validation instead of treating
+; UTF-16's zero high-bytes as malicious NUL corruption.
+
+LabStrategyReadText(path, &encoding := "") {
+    if (path = "" || !FileExist(path))
+        throw Error("Strategy file does not exist.")
+
+    ; UTF-8 is the normal Strategy Lab/upstream path. If decoded text contains NULs,
+    ; retry as UTF-16; this is the common signature of a valid UTF-16 strategy read as
+    ; UTF-8. FileRead's UTF-16 mode honors a BOM and otherwise uses little-endian.
+    text := FileRead(path, "UTF-8")
+    if !InStr(text, Chr(0)) {
+        encoding := "UTF-8"
+        return text
+    }
+
+    try {
+        text16 := FileRead(path, "UTF-16")
+        if !InStr(text16, Chr(0)) {
+            encoding := "UTF-16"
+            return text16
+        }
+    }
+
+    throw Error("Strategy contains embedded NUL bytes and cannot be edited safely.")
+}
 
 LabStrategyValidate(path) {
     if (path = "" || !FileExist(path))
@@ -14,9 +39,8 @@ LabStrategyValidate(path) {
     if (size > 5 * 1024 * 1024)
         throw Error("Strategy file is larger than the 5 MB editor safety limit.")
 
-    text := FileRead(path, "UTF-8")
-    if InStr(text, Chr(0))
-        throw Error("Strategy contains NUL bytes and cannot be edited safely.")
+    encoding := ""
+    text := LabStrategyReadText(path, &encoding)
     if !RegExMatch(text, "im)^\s*\[Steps\]\s*$")
         throw Error("Strategy does not contain a [Steps] section.")
 
@@ -42,5 +66,5 @@ LabStrategyValidate(path) {
     if (suspicious > 0)
         throw Error("Strategy contains placement coordinates outside the editor safety envelope.")
 
-    return {size: size, placements: spawnCount}
+    return {size: size, placements: spawnCount, encoding: encoding}
 }
