@@ -1,9 +1,12 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+#Warn All, Off
 
 ; Validate-only harness: CI invokes this file with AutoHotkey v2 /Validate, so none of
 ; the runtime statements below execute. Function declarations and every #Include are
-; still loaded and validated, including known upstream function arity.
+; still loaded and validated, including known upstream function arity. Warnings are
+; disabled because this intentionally incomplete harness does not define every upstream
+; runtime symbol; parser/arity failures remain fatal and are still reported.
 ExitApp()
 
 StartStrategy(ctrl, *) {
