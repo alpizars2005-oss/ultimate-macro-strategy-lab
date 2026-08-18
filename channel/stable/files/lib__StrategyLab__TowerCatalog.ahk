@@ -50,12 +50,32 @@ LabTowerResolve(towerName) {
     return {key: key, name: Trim(String(towerName)), wikiPage: Trim(String(towerName)), placementLimit: 0, aliases: towerName}
 }
 
+LabTowerImageUsable(path) {
+    if (path = "" || !FileExist(path))
+        return false
+    pBitmap := 0
+    try {
+        pBitmap := Gdip_CreateBitmapFromFile(path)
+        if !pBitmap
+            return false
+        return Gdip_GetImageWidth(pBitmap) > 0 && Gdip_GetImageHeight(pBitmap) > 0
+    } catch {
+        return false
+    } finally {
+        if pBitmap
+            try Gdip_DisposeImage(pBitmap)
+    }
+}
+
 LabTowerCachedPortraitPath(towerName) {
     entry := LabTowerResolve(towerName)
     for ext in ["png", "jpg", "jpeg", "bmp"] {
         path := LabTowerPortraitDir() "\" entry.key "." ext
-        if FileExist(path)
+        if !FileExist(path)
+            continue
+        if LabTowerImageUsable(path)
             return path
+        try FileDelete(path)
     }
     return ""
 }
