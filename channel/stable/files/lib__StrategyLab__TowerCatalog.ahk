@@ -15,6 +15,13 @@ LabTowerPortraitDir() {
     return dir
 }
 
+LabTowerPreviewDir() {
+    dir := LabTowerPortraitDir() "\preview"
+    if !DirExist(dir)
+        DirCreate(dir)
+    return dir
+}
+
 LabTowerCatalog() {
     result := Map()
     path := LabTowerCatalogPath()
@@ -80,10 +87,90 @@ LabTowerCachedPortraitPath(towerName) {
     return ""
 }
 
+; Native Picture controls can crop wide/tall wiki art when both control dimensions
+; are fixed. Build one small square presentation cache per tower instead: the entire
+; source image is scaled with aspect ratio preserved, padded and centered on the same
+; dark surface used by Strategy Lab. The downloaded original cache remains untouched.
+LabTowerPreparePreview(sourcePath, key) {
+    if (sourcePath = "" || !FileExist(sourcePath) || key = "")
+        return ""
+
+    preview := LabTowerPreviewDir() "\" key ".jpg"
+    sourceStamp := ""
+    previewStamp := ""
+    try sourceStamp := FileGetTime(sourcePath, "M")
+    try previewStamp := FileGetTime(preview, "M")
+    if FileExist(preview) && previewStamp != "" && sourceStamp != "" && previewStamp >= sourceStamp {
+        try {
+            if FileGetSize(preview) >= 1500 && LabTowerImageUsable(preview)
+                return preview
+        }
+    }
+
+    pSource := 0
+    pCanvas := 0
+    graphics := 0
+    brush := 0
+    try {
+        pSource := Gdip_CreateBitmapFromFile(sourcePath)
+        if !pSource
+            return ""
+        sourceW := Gdip_GetImageWidth(pSource)
+        sourceH := Gdip_GetImageHeight(pSource)
+        if (sourceW <= 0 || sourceH <= 0)
+            return ""
+
+        canvasSize := 320
+        padding := 22
+        usable := canvasSize - (padding * 2)
+        scale := Min(usable / sourceW, usable / sourceH)
+        drawW := Max(1, Round(sourceW * scale))
+        drawH := Max(1, Round(sourceH * scale))
+        drawX := Floor((canvasSize - drawW) / 2)
+        drawY := Floor((canvasSize - drawH) / 2)
+
+        pCanvas := Gdip_CreateBitmap(canvasSize, canvasSize)
+        if !pCanvas
+            return ""
+        graphics := Gdip_GraphicsFromImage(pCanvas)
+        if !graphics
+            return ""
+        brush := Gdip_BrushCreateSolid(0xFF15191F)
+        Gdip_FillRectangle(graphics, brush, 0, 0, canvasSize, canvasSize)
+        DllCall("gdiplus\GdipSetInterpolationMode", "Ptr", graphics, "Int", 7)
+        Gdip_DrawImage(graphics, pSource, drawX, drawY, drawW, drawH, 0, 0, sourceW, sourceH)
+
+        temp := preview ".tmp.jpg"
+        if FileExist(temp)
+            try FileDelete(temp)
+        Gdip_SaveBitmapToFile(pCanvas, temp, 90)
+        if !FileExist(temp) || FileGetSize(temp) < 1500
+            return ""
+        if FileExist(preview)
+            FileDelete(preview)
+        FileMove(temp, preview, 1)
+        return LabTowerImageUsable(preview) ? preview : ""
+    } catch {
+        return ""
+    } finally {
+        if brush
+            try Gdip_DeleteBrush(brush)
+        if graphics
+            try Gdip_DeleteGraphics(graphics)
+        if pCanvas
+            try Gdip_DisposeImage(pCanvas)
+        if pSource
+            try Gdip_DisposeImage(pSource)
+    }
+}
+
 LabTowerPortraitPath(towerName) {
+    entry := LabTowerResolve(towerName)
     cached := LabTowerCachedPortraitPath(towerName)
-    if (cached != "")
-        return cached
+    if (cached != "") {
+        preview := LabTowerPreparePreview(cached, entry.key)
+        return preview != "" ? preview : cached
+    }
     placeholder := A_ScriptDir "\Resources\StrategyLab\Towers\placeholder.png"
     return FileExist(placeholder) ? placeholder : ""
 }
