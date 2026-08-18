@@ -28,11 +28,13 @@ global LabEditorCanvasY := 205
 global LabEditorCanvasW := 438
 global LabEditorCanvasH := 238
 
-OnMessage(0x0200, StrategyEditorMouseMove)
-OnMessage(0x0202, StrategyEditorMouseUp)
-OnMessage(0x020A, StrategyEditorMouseWheel)
-
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorUi.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorPlacements.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorMaps.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorSave.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorInteraction.ahk"
+
+OnMessage(0x0201, StrategyEditorDirectMouseDown)
+OnMessage(0x0200, StrategyEditorInteractiveMouseMove)
+OnMessage(0x0202, StrategyEditorInteractiveMouseUp)
+OnMessage(0x020A, StrategyEditorInteractiveWheel)
