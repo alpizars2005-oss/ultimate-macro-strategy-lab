@@ -124,7 +124,7 @@ StrategyEditorSetBackground(path, mode := "snapshot") {
 ; Pan/zoom/layout changes only need marker repositioning, so the hot path now avoids
 ; expensive row deletion/reinsertion and stays much closer to display refresh rate.
 StrategyEditorRenderBackground(repositionMarkers := true) {
-    global LabEditorSourceImage, LabEditorViewport, LabEditorViewportPath
+    global LabEditorSourceImage, LabEditorViewport, LabEditorViewportPath, LabEditorViewportAltPath, LabEditorViewportFrame
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
     global LabEditorSnapshot, LabEditorCanvasBg, LabEditorCanvasHint, LabEditorZoomLabel
 
@@ -143,11 +143,15 @@ StrategyEditorRenderBackground(repositionMarkers := true) {
     dir := A_AppData "\Ultimate_Macro\StrategyEditor"
     if !DirExist(dir)
         DirCreate(dir)
-    if LabMapRenderViewport(LabEditorSourceImage, LabEditorViewport, LabEditorViewportPath, LabEditorCanvasW, LabEditorCanvasH) {
-        ; Clearing Value first forces native Picture to release the old frame before
-        ; the next cached viewport is loaded, preventing stale-frame flashes.
+
+    ; Alternate frame files so Windows never has to display a file while GDI+ is
+    ; replacing that same file. This acts as a tiny disk-backed double buffer.
+    renderPath := Mod(LabEditorViewportFrame, 2) = 0 ? LabEditorViewportPath : LabEditorViewportAltPath
+    LabEditorViewportFrame += 1
+
+    if LabMapRenderViewport(LabEditorSourceImage, LabEditorViewport, renderPath, LabEditorCanvasW, LabEditorCanvasH) {
         LabEditorSnapshot.Value := ""
-        LabEditorSnapshot.Value := LabEditorViewportPath
+        LabEditorSnapshot.Value := renderPath
         LabEditorSnapshot.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
         LabEditorSnapshot.Visible := true
         LabEditorCanvasBg.Visible := false
@@ -251,10 +255,15 @@ StrategyEditorToggleExpanded(*) {
 
     ; StrategyEditorWorkspaceApply upgrades these fallback dimensions to the roomy
     ; editor workspace immediately, without waiting for the workspace monitor tick.
+    workspaceApplied := false
     try {
         StrategyEditorWorkspaceApply(true)
-        return
+        workspaceApplied := true
+    } catch {
+        workspaceApplied := false
     }
+    if workspaceApplied
+        return
 
     LabEditorCanvasBg.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
     LabEditorSnapshot.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
