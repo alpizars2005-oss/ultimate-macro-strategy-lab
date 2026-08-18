@@ -4,33 +4,71 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$RepoRawBase = 'https://raw.githubusercontent.com/alpizars2005-oss/ultimate-macro-strategy-lab/main/'
+$RepoUrl = 'https://github.com/alpizars2005-oss/ultimate-macro-strategy-lab.git'
 $repairRoot = Join-Path $env:LOCALAPPDATA 'Ultimate_Macro\StrategyLabRepair'
+$updaterRoot = Join-Path $env:LOCALAPPDATA 'Ultimate_Macro\StrategyLabUpdater'
+$cacheRepo = Join-Path $updaterRoot 'repo'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $backupRoot = Join-Path $repairRoot "backups\$stamp"
 $logPath = Join-Path $repairRoot 'repair.log'
 New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $updaterRoot | Out-Null
 
 function Log([string]$Text) {
     Add-Content -LiteralPath $logPath -Encoding UTF8 -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $Text)
 }
 
-function Raw-Url([string]$Relative) {
-    $parts = $Relative.Replace('\','/').Split('/') | ForEach-Object { [Uri]::EscapeDataString($_) }
-    return $RepoRawBase + ($parts -join '/')
+function Run-Git([string[]]$Arguments, [switch]$Visible) {
+    $psi = New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName = 'git.exe'
+    $psi.WorkingDirectory = $updaterRoot
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = !$Visible
+    $psi.RedirectStandardOutput = !$Visible
+    $psi.RedirectStandardError = !$Visible
+    # .NET ProcessStartInfo on Windows PowerShell has no ArgumentList collection. Quote
+    # each value ourselves; these arguments are controlled by this script, not user input.
+    $quoted = foreach ($arg in $Arguments) {
+        if ($arg -match '[\s"]') { '"' + ($arg -replace '"','\"') + '"' } else { $arg }
+    }
+    $psi.Arguments = ($quoted -join ' ')
+    $p = New-Object Diagnostics.Process
+    $p.StartInfo = $psi
+    if (!$p.Start()) { throw 'Could not launch git.exe.' }
+    $p.WaitForExit()
+    if (!$Visible) {
+        $out = $p.StandardOutput.ReadToEnd()
+        $err = $p.StandardError.ReadToEnd()
+        if ($out) { Log ('GIT OUT ' + ($out.Trim() -replace "`r?`n", ' | ')) }
+        if ($err) { Log ('GIT ERR ' + ($err.Trim() -replace "`r?`n", ' | ')) }
+    }
+    return $p.ExitCode
 }
 
-function Download-Bytes([string]$Relative) {
-    $wc = New-Object Net.WebClient
-    $wc.Headers['User-Agent'] = 'UltimateMacroStrategyLab-Repair/1.0'
-    try { return $wc.DownloadData((Raw-Url $Relative)) }
-    finally { $wc.Dispose() }
+function Refresh-PrivateCache {
+    try { & git.exe --version *> $null } catch { throw 'Git for Windows is required. Install Git or use the existing Strategy Lab updater cache.' }
+
+    if (!(Test-Path -LiteralPath (Join-Path $cacheRepo '.git') -PathType Container)) {
+        if (Test-Path -LiteralPath $cacheRepo) { Remove-Item -LiteralPath $cacheRepo -Recurse -Force }
+        Write-Host 'Connecting to the private Strategy Lab repository...' -ForegroundColor Cyan
+        Write-Host 'GitHub may open your browser once through Git Credential Manager.' -ForegroundColor DarkGray
+        Log 'CACHE cloning private repository through Git Credential Manager.'
+        $code = Run-Git @('clone','--depth','1','--branch','main',$RepoUrl,$cacheRepo) -Visible
+        if ($code -ne 0 -or !(Test-Path -LiteralPath (Join-Path $cacheRepo '.git') -PathType Container)) {
+            throw "Private repository clone failed (git exit $code). Complete any GitHub sign-in window and run the repair again."
+        }
+        return
+    }
+
+    Log 'CACHE refreshing existing private updater repository.'
+    $code = Run-Git @('-C',$cacheRepo,'fetch','--quiet','--depth','1','origin','main')
+    if ($code -ne 0) { throw "Could not fetch the private Strategy Lab repository (git exit $code)." }
+    $code = Run-Git @('-C',$cacheRepo,'reset','--quiet','--hard','FETCH_HEAD')
+    if ($code -ne 0) { throw "Could not reset the private Strategy Lab cache (git exit $code)." }
 }
 
-function Sha256([byte[]]$Bytes) {
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant() }
-    finally { $sha.Dispose() }
+function Sha256File([string]$Path) {
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
 function Safe-Target([string]$Relative) {
@@ -70,62 +108,67 @@ try {
 
     Log ("BEGIN repair install={0}" -f $InstallDir)
     Stop-RunningLab $InstallDir
+    Refresh-PrivateCache
 
-    $versionBytes = Download-Bytes 'channel/stable/version.ini'
-    $versionText = [Text.Encoding]::UTF8.GetString($versionBytes)
+    $channel = Join-Path $cacheRepo 'channel\stable'
+    $versionPath = Join-Path $channel 'version.ini'
+    $manifestPath = Join-Path $channel 'files.manifest'
+    if (!(Test-Path -LiteralPath $versionPath -PathType Leaf) -or !(Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw 'Private update cache is incomplete (version.ini/files.manifest missing).'
+    }
+
+    $versionText = Get-Content -LiteralPath $versionPath -Raw
     if ($versionText -notmatch '(?im)^Version\s*=\s*([^\r\n]+)') { throw 'Stable channel version.ini is invalid.' }
     $stableVersion = $Matches[1].Trim()
 
-    $manifestBytes = Download-Bytes 'channel/stable/files.manifest'
-    $manifestText = [Text.Encoding]::UTF8.GetString($manifestBytes)
     $entries = @()
-
-    foreach ($raw in ($manifestText -split "`r?`n")) {
+    foreach ($raw in Get-Content -LiteralPath $manifestPath) {
         $line = $raw.Trim()
         if (!$line -or $line.StartsWith('#')) { continue }
         $parts = $line.Split('|')
         if ($parts.Count -ne 4) { throw "Invalid stable manifest line: $line" }
         $hash = $parts[0].Trim().ToLowerInvariant()
         $target = $parts[1].Trim().Replace('/','\')
-        $source = $parts[2].Trim().Replace('\','/')
+        $source = $parts[2].Trim().Replace('/','\')
         $mode = $parts[3].Trim().ToLowerInvariant()
         if ($hash -notmatch '^[0-9a-f]{64}$') { throw "Invalid SHA-256 in manifest: $line" }
-        if (!(Safe-Target $target)) { continue } # Ignore non-Lab/upstream files defensively.
+        if (!(Safe-Target $target)) { continue }
         if ($mode -ne 'raw' -and $mode -ne 'base64') { throw "Unsupported mode: $mode" }
-        $entries += [PSCustomObject]@{ Hash=$hash; Target=$target; Source=$source; Mode=$mode }
+        $sourcePath = Join-Path $cacheRepo $source
+        if (!(Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw "Stable source is missing: $source" }
+        $entries += [PSCustomObject]@{ Hash=$hash; Target=$target; SourcePath=$sourcePath; Mode=$mode }
     }
     if ($entries.Count -lt 10) { throw 'Stable manifest did not contain the expected Strategy Lab module set.' }
 
-    Write-Host "Strategy Lab recovery: downloading verified stable $stableVersion ..." -ForegroundColor Cyan
+    Write-Host "Strategy Lab recovery: restoring verified stable $stableVersion ..." -ForegroundColor Cyan
     $written = @()
     foreach ($entry in $entries) {
-        $sourceBytes = Download-Bytes $entry.Source
-        if ($entry.Mode -eq 'base64') {
-            $b64 = [Text.Encoding]::ASCII.GetString($sourceBytes).Trim()
-            $payload = [Convert]::FromBase64String($b64)
-        } else {
-            $payload = $sourceBytes
-        }
-
-        $actual = Sha256 $payload
-        if ($actual -ne $entry.Hash) { throw "Hash mismatch for $($entry.Target). Expected $($entry.Hash), got $actual" }
-
         $targetPath = Join-Path $InstallDir $entry.Target
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $targetPath) | Out-Null
+
+        $stage = Join-Path $env:TEMP ('strategy-lab-repair-' + [guid]::NewGuid().ToString('N'))
+        if ($entry.Mode -eq 'base64') {
+            $base64 = (Get-Content -LiteralPath $entry.SourcePath -Raw).Trim()
+            [IO.File]::WriteAllBytes($stage, [Convert]::FromBase64String($base64))
+        } else {
+            Copy-Item -LiteralPath $entry.SourcePath -Destination $stage -Force
+        }
+
+        $actual = Sha256File $stage
+        if ($actual -ne $entry.Hash) {
+            Remove-Item -LiteralPath $stage -Force -ErrorAction SilentlyContinue
+            throw "Hash mismatch for $($entry.Target). Expected $($entry.Hash), got $actual"
+        }
+
         if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
             $backupPath = Join-Path $backupRoot $entry.Target
             New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backupPath) | Out-Null
             Copy-Item -LiteralPath $targetPath -Destination $backupPath -Force
         }
 
-        $tmp = $targetPath + '.repair.tmp'
-        [IO.File]::WriteAllBytes($tmp, $payload)
-        Move-Item -LiteralPath $tmp -Destination $targetPath -Force
+        Move-Item -LiteralPath $stage -Destination $targetPath -Force
         $written += $entry.Target
     }
-
-    # Mark the recovered module version only after every download/hash succeeds.
-    [IO.File]::WriteAllText((Join-Path $InstallDir 'lab_version.ini'), "[Lab]`r`nVersion=$stableVersion`r`n", (New-Object Text.UTF8Encoding($false)))
 
     $preflight = Join-Path $InstallDir 'submacros\lab_preflight.ps1'
     if (Test-Path -LiteralPath $preflight -PathType Leaf) {
@@ -140,8 +183,11 @@ try {
         throw "Integrated AutoHotkey syntax check still failed. See %APPDATA%\Ultimate_Macro\StrategyEditor\syntax-probe.log. Backups are in $backupRoot"
     }
 
+    # Mark recovered version only after preflight AND the real bundled AutoHotkey parser pass.
+    [IO.File]::WriteAllText((Join-Path $InstallDir 'lab_version.ini'), "[Lab]`r`nVersion=$stableVersion`r`n", (New-Object Text.UTF8Encoding($false)))
+
     Log ("SUCCESS repaired to {0}; files={1}" -f $stableVersion,$written.Count)
-    Write-Host "`nSUCCESS: Strategy Lab $stableVersion passed the integrated syntax check." -ForegroundColor Green
+    Write-Host "`nSUCCESS: Strategy Lab $stableVersion passed the integrated AutoHotkey syntax check." -ForegroundColor Green
     Write-Host "Backup: $backupRoot" -ForegroundColor DarkGray
 
     if (!$NoLaunch) {
@@ -155,7 +201,7 @@ try {
     Log ('FAILED ' + $_.Exception.ToString())
     Write-Host "`nREPAIR FAILED SAFELY" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    Write-Host "`nNothing in Resources\Strats was touched." -ForegroundColor Yellow
+    Write-Host "`nResources\Strats was NOT touched." -ForegroundColor Yellow
     Write-Host "Log: $logPath" -ForegroundColor Yellow
     Write-Host "Backup: $backupRoot" -ForegroundColor Yellow
     exit 1
