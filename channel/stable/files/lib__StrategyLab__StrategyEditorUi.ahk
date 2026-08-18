@@ -8,7 +8,7 @@ StrategyEditorCreateTab(gui) {
     global LabEditorList, LabEditorXCtrl, LabEditorYCtrl, LabEditorApplyBtn, LabEditorSaveBtn
     global LabEditorOverwriteBtn, LabEditorStatus, LabEditorDirty
     global LabEditorZoomOutBtn, LabEditorZoomLabel, LabEditorZoomInBtn, LabEditorFitBtn, LabEditorExpandBtn
-    global LabEditorPanLeftBtn, LabEditorPanUpBtn, LabEditorPanDownBtn, LabEditorPanRightBtn, LabEditorSyncBtn
+    global LabEditorPanLeftBtn, LabEditorPanUpBtn, LabEditorPanDownBtn, LabEditorPanRightBtn, LabEditorSyncBtn, LabEditorRingsBtn
     global LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorMapLabel, LabEditorCoordLabel, LabEditorDirtyLabel
     global LabEditorAssetBadge, LabEditorInfoPanel, LabEditorCanvasHint
     global LabEditorTitle, LabEditorSubtitle, LabEditorHeaderLine, LabEditorLayerLabel
@@ -46,8 +46,9 @@ StrategyEditorCreateTab(gui) {
     LabEditorPanDownBtn := gui.Add("Button", "x291 y177 w28 h24 Hidden", "↓")
     LabEditorPanRightBtn := gui.Add("Button", "x322 y177 w28 h24 Hidden", "→")
     LabEditorSyncBtn := gui.Add("Button", "x356 y177 w86 h24 Hidden", "Sync Assets")
+    LabEditorRingsBtn := gui.Add("Button", "x446 y177 w82 h24 Hidden", "Rings: All")
     gui.SetFont("s7 w500 cA8A8A8", "Segoe UI")
-    LabEditorMapLabel := gui.Add("Text", "x450 y181 w220 h18 Hidden Right", "Map: -")
+    LabEditorMapLabel := gui.Add("Text", "x532 y181 w138 h18 Hidden Right", "Map: -")
 
     ; Canvas
     LabEditorCanvasBg := gui.Add("Text", "x" LabEditorCanvasX " y" LabEditorCanvasY
@@ -64,7 +65,7 @@ StrategyEditorCreateTab(gui) {
     gui.SetFont("s10 w700 cF2F2F2", "Segoe UI")
     LabEditorTowerName := gui.Add("Text", "x554 y218 w106 h38 Hidden Background171717", "Select a placement")
     gui.SetFont("s7 w400 c9C9C9C", "Segoe UI")
-    LabEditorTowerMeta := gui.Add("Text", "x554 y258 w106 h24 Hidden Background171717", "Click a marker or row")
+    LabEditorTowerMeta := gui.Add("Text", "x554 y258 w106 h36 Hidden Background171717", "Click a marker or row")
 
     gui.SetFont("s8 w400 cEAEAEA", "Segoe UI")
     LabEditorList := gui.Add("ListView", "x480 y288 w180 h145 Hidden Grid -Multi Background202020 cEAEAEA", ["#", "Unit", "X", "Y"])
@@ -107,6 +108,7 @@ StrategyEditorCreateTab(gui) {
     LabEditorPanRightBtn.OnEvent("Click", (*) => StrategyEditorPan(0.18, 0))
     LabEditorExpandBtn.OnEvent("Click", StrategyEditorToggleExpanded)
     LabEditorSyncBtn.OnEvent("Click", StrategyEditorSyncAssets)
+    LabEditorRingsBtn.OnEvent("Click", StrategyEditorToggleRings)
     LabEditorLayerCtrl.OnEvent("Change", StrategyEditorLayerChanged)
     LabEditorList.OnEvent("ItemSelect", StrategyEditorRowSelected)
     LabEditorApplyBtn.OnEvent("Click", StrategyEditorApplyCoordinates)
@@ -118,7 +120,7 @@ StrategyEditorCreateTab(gui) {
         LabEditorOpenBtn, LabEditorCurrentBtn, LabEditorSnapshotBtn, LabEditorCaptureBtn,
         LabEditorUndoBtn, LabEditorRedoBtn, LabEditorZoomOutBtn, LabEditorZoomLabel, LabEditorZoomInBtn,
         LabEditorFitBtn, LabEditorExpandBtn, LabEditorLayerLabel, LabEditorLayerCtrl, LabEditorPanLeftBtn, LabEditorPanUpBtn,
-        LabEditorPanDownBtn, LabEditorPanRightBtn, LabEditorSyncBtn, LabEditorMapLabel,
+        LabEditorPanDownBtn, LabEditorPanRightBtn, LabEditorSyncBtn, LabEditorRingsBtn, LabEditorMapLabel,
         LabEditorCanvasBg, LabEditorSnapshot, LabEditorCanvasHint, LabEditorInfoPanel,
         LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList,
         LabEditorCoordLabel, LabEditorDirtyLabel, LabEditorXCtrl, LabEditorYCtrl, LabEditorApplyBtn, LabEditorSaveBtn,
@@ -131,9 +133,11 @@ StrategyEditorShow() {
     global LabEditorCtrls, LabEditorDoc, LabEditorCanvasBg, LabEditorSnapshot, LabEditorExpanded
     global LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList, LabEditorCoordLabel, LabEditorDirtyLabel
     global LabEditorXCtrl, LabEditorYCtrl, LabEditorApplyBtn, LabEditorSaveBtn, LabEditorOverwriteBtn, LabEditorDirty, LabEditorStatus
-    global LabEditorInfoPanel
+    global LabEditorInfoPanel, LabEditorRingsBtn
     for ctrl in LabEditorCtrls
         ctrl.Visible := true
+    if IsObject(LabEditorRingsBtn)
+        LabEditorRingsBtn.Text := StrategyEditorRingButtonText()
     if (LabEditorSnapshot.Value != "")
         LabEditorCanvasBg.Visible := false
     if LabEditorExpanded {
@@ -149,7 +153,7 @@ StrategyEditorShow() {
 }
 
 StrategyEditorTryBeginDrag(hwnd) {
-    global LabEditorMarkerByHwnd, LabEditorDragPlacement, LabEditorDragMarker
+    global LabEditorMarkerByHwnd, LabEditorDragPlacement, LabEditorDragMarker, LabEditorDragRing
     global LabEditorDragOldX, LabEditorDragOldY, MainGui, LabEditorBackgroundMode
     if !LabEditorMarkerByHwnd.Has(hwnd)
         return false
@@ -161,6 +165,7 @@ StrategyEditorTryBeginDrag(hwnd) {
     entry := LabEditorMarkerByHwnd[hwnd]
     LabEditorDragPlacement := entry.placement
     LabEditorDragMarker := entry.ctrl
+    LabEditorDragRing := IsObject(entry.ring) ? entry.ring : ""
     LabEditorDragOldX := entry.placement.x
     LabEditorDragOldY := entry.placement.y
     StrategyEditorSelectPlacement(entry.index)
