@@ -58,6 +58,7 @@ jobs:
               'lib/StrategyLab/StrategyEditorUi.ahk',
               'lib/StrategyLab/StrategyEditorPlacements.ahk',
               'lib/StrategyLab/StrategyEditorMaps.ahk',
+              'lib/StrategyLab/StrategyEditorWorkspace.ahk',
               'lib/StrategyLab/MapLibrary.ahk',
               'lib/StrategyLab/TowerCatalog.ahk',
               'submacros/lab_assets.ps1',
@@ -68,7 +69,7 @@ jobs:
         shell: pwsh
         run: |
           $files = @(
-            'channel/stable/files/submacros__lab_assets.ps1',
+            'channel/stable/files/submacros__lab_assets_v2.ps1',
             'channel/stable/files/submacros__lab_update.ps1'
           )
           foreach ($file in $files) {
