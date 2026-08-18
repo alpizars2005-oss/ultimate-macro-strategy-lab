@@ -23,10 +23,10 @@ global LabEditorAssetSyncPid := 0
 global LabEditorAssetsRequested := false
 global LabEditorViewportPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport.png"
 
-global LabEditorCanvasX := 30
-global LabEditorCanvasY := 180
-global LabEditorCanvasW := 420
-global LabEditorCanvasH := 236
+global LabEditorCanvasX := 20
+global LabEditorCanvasY := 205
+global LabEditorCanvasW := 438
+global LabEditorCanvasH := 238
 
 OnMessage(0x0200, StrategyEditorMouseMove)
 OnMessage(0x0202, StrategyEditorMouseUp)
