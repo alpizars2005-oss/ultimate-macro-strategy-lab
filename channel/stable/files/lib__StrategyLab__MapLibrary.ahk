@@ -31,7 +31,7 @@ LabMapReferenceDir() {
     return dir
 }
 
-LabMapCatalogPath() => A_WorkingDir "\Resources\StrategyLab\Maps\catalog.ini"
+LabMapCatalogPath() => A_ScriptDir "\Resources\StrategyLab\Maps\catalog.ini"
 
 LabMapCatalog() {
     result := Map()
@@ -128,7 +128,6 @@ class LabMapViewport {
     ZoomBy(delta) => this.SetZoom(this.Zoom + delta)
 
     Pan(dx, dy) {
-        ; dx/dy are fractions of the currently visible viewport.
         visibleW := 1.0 / this.Zoom
         visibleH := 1.0 / this.Zoom
         this.CenterX += Number(dx) * visibleW
