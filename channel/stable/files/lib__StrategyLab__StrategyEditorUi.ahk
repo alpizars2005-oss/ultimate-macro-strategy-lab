@@ -11,14 +11,15 @@ StrategyEditorCreateTab(gui) {
     global LabEditorPanLeftBtn, LabEditorPanUpBtn, LabEditorPanDownBtn, LabEditorPanRightBtn, LabEditorSyncBtn
     global LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorMapLabel, LabEditorCoordLabel, LabEditorDirtyLabel
     global LabEditorAssetBadge, LabEditorInfoPanel, LabEditorCanvasHint
+    global LabEditorTitle, LabEditorSubtitle, LabEditorHeaderLine, LabEditorLayerLabel
 
     ; Header
     gui.SetFont("s11 w700 c4CA3FF", "Segoe UI")
-    title := gui.Add("Text", "x20 y94 w260 h24 Hidden", "Visual Strategy Editor")
+    LabEditorTitle := gui.Add("Text", "x20 y94 w260 h24 Hidden", "Visual Strategy Editor")
     gui.SetFont("s7 w400 c8E8E8E", "Segoe UI")
-    subtitle := gui.Add("Text", "x20 y116 w420 h18 Hidden", "Map-aware placement editing • safe saves • precision zoom")
+    LabEditorSubtitle := gui.Add("Text", "x20 y116 w420 h18 Hidden", "Map-aware placement editing • safe saves • precision zoom")
     LabEditorAssetBadge := gui.Add("Text", "x470 y103 w200 h18 Hidden Right c8E8E8E", "Assets: waiting for strategy")
-    line := gui.Add("Progress", "x20 y137 w650 h1 Hidden Background333333", 0)
+    LabEditorHeaderLine := gui.Add("Progress", "x20 y137 w650 h1 Hidden Background333333", 0)
 
     ; Primary toolbar
     gui.SetFont("s8 w500 cFFFFFF", "Segoe UI")
@@ -36,7 +37,7 @@ StrategyEditorCreateTab(gui) {
 
     ; Secondary toolbar
     gui.SetFont("s7 w500 cA8A8A8", "Segoe UI")
-    layerLabel := gui.Add("Text", "x20 y181 w34 h18 Hidden", "Layer")
+    LabEditorLayerLabel := gui.Add("Text", "x20 y181 w34 h18 Hidden", "Layer")
     gui.SetFont("s8 w400 c000000", "Segoe UI")
     LabEditorLayerCtrl := gui.Add("DropDownList", "x55 y177 w168 Hidden", ["All placements"])
     gui.SetFont("s8 w500 cFFFFFF", "Segoe UI")
@@ -65,7 +66,6 @@ StrategyEditorCreateTab(gui) {
     gui.SetFont("s7 w400 c9C9C9C", "Segoe UI")
     LabEditorTowerMeta := gui.Add("Text", "x554 y258 w106 h24 Hidden Background171717", "Click a marker or row")
 
-    ; Explicit dark colors keep rows readable on Windows' native ListView.
     gui.SetFont("s8 w400 cEAEAEA", "Segoe UI")
     LabEditorList := gui.Add("ListView", "x480 y288 w180 h145 Hidden Grid -Multi Background202020 cEAEAEA", ["#", "Unit", "X", "Y"])
     LabEditorList.ModifyCol(1, 25)
@@ -114,10 +114,10 @@ StrategyEditorCreateTab(gui) {
     LabEditorOverwriteBtn.OnEvent("Click", StrategyEditorOverwrite)
 
     LabEditorCtrls := [
-        title, subtitle, LabEditorAssetBadge, line,
+        LabEditorTitle, LabEditorSubtitle, LabEditorAssetBadge, LabEditorHeaderLine,
         LabEditorOpenBtn, LabEditorCurrentBtn, LabEditorSnapshotBtn, LabEditorCaptureBtn,
         LabEditorUndoBtn, LabEditorRedoBtn, LabEditorZoomOutBtn, LabEditorZoomLabel, LabEditorZoomInBtn,
-        LabEditorFitBtn, LabEditorExpandBtn, layerLabel, LabEditorLayerCtrl, LabEditorPanLeftBtn, LabEditorPanUpBtn,
+        LabEditorFitBtn, LabEditorExpandBtn, LabEditorLayerLabel, LabEditorLayerCtrl, LabEditorPanLeftBtn, LabEditorPanUpBtn,
         LabEditorPanDownBtn, LabEditorPanRightBtn, LabEditorSyncBtn, LabEditorMapLabel,
         LabEditorCanvasBg, LabEditorSnapshot, LabEditorCanvasHint, LabEditorInfoPanel,
         LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList,
@@ -199,7 +199,6 @@ StrategyEditorLoadPath(path) {
         StrategyEditorBuildLayers()
         StrategyEditorAutoLoadMap()
         StrategyEditorBuildMarkers()
-        ; Give the editor an immediately useful state instead of an empty details pane.
         StrategyEditorSelectPlacement(1)
         StrategyEditorSetStatus("Loaded " LabEditorDoc.Placements.Length " placements from " path ". " StrategyEditorBackgroundDescription())
         StrategyEditorRefreshButtons()
