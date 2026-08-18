@@ -172,11 +172,15 @@ LabUpdaterLaunchInstaller(remoteVersion) {
     }
 
     pid := DllCall("GetCurrentProcessId")
+    launcherPath := StrReplace(A_AhkPath, '"', '')
+    entryScript := StrReplace(A_ScriptFullPath, '"', '')
     cmd := 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' tempUpdater
         . '" -InstallDir "' A_ScriptDir
         . '" -CacheDir "' LabUpdaterCacheRepo()
         . '" -ExpectedVersion "' remoteVersion
         . '" -ParentPid ' pid
+        . ' -LauncherPath "' launcherPath
+        . '" -EntryScript "' entryScript '"'
     try {
         Run(cmd, , "Hide")
         ExitApp()
