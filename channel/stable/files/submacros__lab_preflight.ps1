@@ -16,24 +16,85 @@ function Write-Utf8NoBom([string]$Path,[string]$Text) {
 }
 
 function Normalize-InstallDir([string]$Value) {
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        throw 'InstallDir is empty.'
-    }
-
-    # Older run_lab.bat builds passed %~dp0 directly. Because that value ends in a
-    # backslash, Windows command-line parsing can preserve a stray quote at the end
-    # (for example C:\Macro\"). Strip only wrapping/stray quote characters, expand
-    # environment variables, then canonicalize the path before touching files.
+    if ([string]::IsNullOrWhiteSpace($Value)) { throw 'InstallDir is empty.' }
     $candidate = [Environment]::ExpandEnvironmentVariables($Value.Trim()).Trim('"')
-    if ([string]::IsNullOrWhiteSpace($candidate)) {
-        throw 'InstallDir became empty after normalization.'
+    if ([string]::IsNullOrWhiteSpace($candidate)) { throw 'InstallDir became empty after normalization.' }
+    $full = [IO.Path]::GetFullPath($candidate)
+    if (!(Test-Path -LiteralPath $full -PathType Container)) { throw "InstallDir does not exist: $full" }
+    return $full
+}
+
+function Backup-Main([string]$Main,[string]$Reason) {
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $backup = $Main + '.preflight-' + $stamp + '.bak'
+    Copy-Item -LiteralPath $Main -Destination $backup -Force
+    Log ("BACKUP {0}: {1}" -f $Reason, $backup)
+    return $backup
+}
+
+function Repair-StrayClear([string]$Text,[string]$Main,[ref]$Changed) {
+    $pattern = '(?ms)^(?<indent>[ \t]*)Clear[ \t]*\r?\n(?=[ \t]*colors[ \t]*:=[ \t]*Map\(\)[ \t]*\r?\n[ \t]*colors\["Background"\])'
+    $matches = [regex]::Matches($Text, $pattern)
+    if ($matches.Count -gt 1) { throw "found $($matches.Count) candidate stray Clear lines; refusing ambiguous repair." }
+    if ($matches.Count -eq 1) {
+        Backup-Main $Main 'stray-Clear repair' | Out-Null
+        $Text = [regex]::Replace($Text, $pattern, '', 1)
+        $Changed.Value = $true
+        Log 'REPAIRED stray Clear parser line.'
+    }
+    return $Text
+}
+
+function Install-RemoteBoundary([string]$Text,[string]$Main,[ref]$Changed) {
+    if ($Text.Contains('LabRemoteConsumeBetweenMatches(&switched, &stratName)')) {
+        Log 'OK remote between-match boundary already installed.'
+        return $Text
     }
 
-    $full = [IO.Path]::GetFullPath($candidate)
-    if (!(Test-Path -LiteralPath $full -PathType Container)) {
-        throw "InstallDir does not exist: $full"
+    # Ultimate Macro 1.3.x keeps this stable sequence at the beginning of RunStrategy.
+    # We patch only that exact high-confidence boundary and never touch PlayStrategy().
+    $pattern = '(?m)^(?<indent>[ \t]*)switched[ \t]*:=[ \t]*false[ \t]*\r?$'
+    $matches = [regex]::Matches($Text, $pattern)
+    if ($matches.Count -ne 1) {
+        Log ("WARN remote boundary not installed: expected exactly one 'switched := false', found {0}." -f $matches.Count)
+        return $Text
     }
-    return $full
+
+    $m = $matches[0]
+    $indent = $m.Groups['indent'].Value
+    $hook = $m.Value + "`r`n" +
+        $indent + 'stratName := IniRead(StateFile, "State", "Strategy", "")' + "`r`n" +
+        $indent + '; Strategy Lab remote commands are consumed only between matches.' + "`r`n" +
+        $indent + 'labRemoteAction := LabRemoteConsumeBetweenMatches(&switched, &stratName)' + "`r`n" +
+        $indent + 'if (labRemoteAction = "stop")' + "`r`n" +
+        $indent + '    return'
+
+    Backup-Main $Main 'remote-boundary install' | Out-Null
+    $Text = $Text.Substring(0, $m.Index) + $hook + $Text.Substring($m.Index + $m.Length)
+    $Changed.Value = $true
+    Log 'INSTALLED safe remote between-match boundary in RunStrategy().' 
+    return $Text
+}
+
+function Verify-LabModules([string]$InstallRoot) {
+    $required = @(
+        'lib\StrategyLab\StrategyEditorTab.ahk',
+        'lib\StrategyLab\LabSafety.ahk',
+        'lib\StrategyLab\LabStrategyValidation.ahk',
+        'lib\StrategyLab\LabTelemetry.ahk',
+        'lib\StrategyLab\LabRemoteGate.ahk',
+        'submacros\lab_discord_worker.ps1',
+        'submacros\lab_remote_settings.ps1'
+    )
+    $missing = @()
+    foreach ($relative in $required) {
+        if (!(Test-Path -LiteralPath (Join-Path $InstallRoot $relative) -PathType Leaf)) { $missing += $relative }
+    }
+    if ($missing.Count -gt 0) {
+        Log ('WARN optional 0.3 modules missing locally: ' + ($missing -join ', ') + '. Run the Strategy Lab updater.')
+    } else {
+        Log 'OK Strategy Lab 0.3 module set present.'
+    }
 }
 
 try {
@@ -47,35 +108,27 @@ try {
     }
 
     $text = [IO.File]::ReadAllText($main)
-
-    # Never touch a file that appears to contain an unresolved source-control merge.
     if ($text -match '(?m)^(<<<<<<<|=======|>>>>>>>)') {
         Log 'ERROR unresolved merge markers detected in Main_Lab.ahk; refusing automatic repair.'
         exit 3
     }
 
-    # Live Windows testing exposed one local package with an isolated bare `Clear`
-    # immediately before the theme color map. `Clear` is not a valid AHK v2 action,
-    # so the parser exits before Strategy Lab can even reach its updater. Repair only
-    # this exact, high-confidence signature; never delete arbitrary lines named Clear.
-    $pattern = '(?ms)^(?<indent>[ \t]*)Clear[ \t]*\r?\n(?=[ \t]*colors[ \t]*:=[ \t]*Map\(\)[ \t]*\r?\n[ \t]*colors\["Background"\])'
-    $matches = [regex]::Matches($text, $pattern)
-    if ($matches.Count -gt 1) {
-        Log "ERROR found $($matches.Count) candidate stray Clear lines; refusing ambiguous repair."
-        exit 4
-    }
+    $changed = $false
+    $text = Repair-StrayClear $text $main ([ref]$changed)
 
-    if ($matches.Count -eq 1) {
-        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-        $backup = $main + '.preflight-' + $stamp + '.bak'
-        Copy-Item -LiteralPath $main -Destination $backup -Force
-        $fixed = [regex]::Replace($text, $pattern, '', 1)
-        Write-Utf8NoBom $main $fixed
-        Log "REPAIRED stray Clear parser line. Backup: $backup"
+    # Install the remote hook only when the bridge module is actually present. This
+    # keeps preflight backward compatible while a machine is still finishing 0.3 update.
+    $remoteGate = Join-Path $installRoot 'lib\StrategyLab\LabRemoteGate.ahk'
+    if (Test-Path -LiteralPath $remoteGate -PathType Leaf) {
+        $text = Install-RemoteBoundary $text $main ([ref]$changed)
     } else {
-        Log 'OK no known Main_Lab parser corruption detected.'
+        Log 'INFO remote bridge not installed yet; skipping RunStrategy hook.'
     }
 
+    if ($changed) { Write-Utf8NoBom $main $text }
+    else { Log 'OK no Main_Lab source repair required.' }
+
+    Verify-LabModules $installRoot
     exit 0
 } catch {
     Log ('ERROR preflight exception: ' + $_.Exception.Message)
