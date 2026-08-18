@@ -9,8 +9,9 @@ global LabRemoteRoot := A_AppData "\Ultimate_Macro\StrategyEditor"
 global LabRemoteConfig := LabRemoteRoot "\remote.ini"
 global LabRemoteWorkerPid := 0
 global LabRemoteLabCommandFile := LabRemoteRoot "\lab_remote_command.ini"
-
 global LabRemoteSettingsPid := 0
+global LabRemoteWebhookBtn := ""
+global LabRemoteWebhookInstallAttempts := 0
 
 LabRemoteEnsureRoot() {
     global LabRemoteRoot
@@ -19,9 +20,17 @@ LabRemoteEnsureRoot() {
     return LabRemoteRoot
 }
 
+LabRemoteLog(text) {
+    global LabRemoteRoot
+    try {
+        LabRemoteEnsureRoot()
+        FileAppend(FormatTime(, "yyyy-MM-dd HH:mm:ss") " " String(text) "`n", LabRemoteRoot "\remote-ahk.log", "UTF-8")
+    }
+}
+
 LabRemoteEnabled() {
     global LabRemoteConfig
-    return FileExist(LabRemoteConfig) && IniRead(LabRemoteConfig, "Remote", "Enabled", 0) = "1"
+    return FileExist(LabRemoteConfig) && String(IniRead(LabRemoteConfig, "Remote", "Enabled", 0)) = "1"
 }
 
 LabRemoteLaunchSettings(*) {
@@ -33,19 +42,76 @@ LabRemoteLaunchSettings(*) {
     if !FileExist(script) {
         msg := "Remote settings helper is missing: " script
         try StrategyEditorSetStatus(msg, true)
-        try MsgBox(msg "`n`nRun/update Strategy Lab 0.3.3+.", "Strategy Lab Remote", 0x10)
+        try MsgBox(msg "`n`nRun the Strategy Lab repair tool or update to 0.3.5+.", "Strategy Lab Remote", 0x10)
+        return
+    }
+
+    ; Do not spawn a stack of settings windows if the user clicks twice.
+    if (LabRemoteSettingsPid && ProcessExist(LabRemoteSettingsPid)) {
+        try StrategyEditorSetStatus("Discord Remote settings are already open.")
         return
     }
 
     cmd := 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' script '" -InstallDir "' A_ScriptDir '"'
     try {
         Run(cmd, A_ScriptDir, , &LabRemoteSettingsPid)
-        try StrategyEditorSetStatus("Opening Discord Remote settings…")
+        LabRemoteLog("settings UI launched PID " LabRemoteSettingsPid)
+        try StrategyEditorSetStatus("Opening Discord Remote settings...")
     } catch Error as err {
+        LabRemoteSettingsPid := 0
+        LabRemoteLog("settings launcher ERROR: " err.Message)
         try FileAppend(FormatTime(, "yyyy-MM-dd HH:mm:ss") " ERROR launcher: " err.Message "`n", logPath, "UTF-8")
         try StrategyEditorSetStatus("Could not open Remote settings: " err.Message, true)
         try MsgBox("Could not open Discord Remote settings.`n`n" err.Message "`n`nLog: " logPath, "Strategy Lab Remote", 0x10)
     }
+}
+
+; The old Dark-style title shortcut depends on a native Static control receiving click
+; notifications. Keep that shortcut, but also create a real Button on the Webhook tab.
+; The button does not require patching upstream tab arrays and is shown by a guarded
+; monitor only while Tab4 is active, so there is always a reliable entry point.
+LabRemoteInstallWebhookEntry(*) {
+    global MainGui, Tab4_Title, LabRemoteWebhookBtn, LabRemoteWebhookInstallAttempts
+
+    LabRemoteWebhookInstallAttempts += 1
+    if !IsSet(MainGui) || !IsObject(MainGui) {
+        if (LabRemoteWebhookInstallAttempts < 30)
+            SetTimer(LabRemoteInstallWebhookEntry, -250)
+        return
+    }
+
+    if IsSet(Tab4_Title) && IsObject(Tab4_Title) {
+        ; SS_NOTIFY: allows the preflight-installed title Click callback to fire on
+        ; Windows builds where a plain Text control otherwise ignores mouse clicks.
+        try Tab4_Title.Opt("+0x100")
+    }
+
+    if !IsObject(LabRemoteWebhookBtn) {
+        try {
+            LabRemoteWebhookBtn := MainGui.Add("Button", "x515 y88 w155 h30 Hidden", "Discord Remote")
+            LabRemoteWebhookBtn.OnEvent("Click", LabRemoteLaunchSettings)
+        } catch Error as err {
+            LabRemoteLog("Webhook-tab Remote button creation failed: " err.Message)
+            if (LabRemoteWebhookInstallAttempts < 30)
+                SetTimer(LabRemoteInstallWebhookEntry, -250)
+            return
+        }
+    }
+
+    SetTimer(LabRemoteWebhookUiTick, 150)
+}
+
+LabRemoteWebhookUiTick(*) {
+    global LabRemoteWebhookBtn, CurrentTab
+    if !IsObject(LabRemoteWebhookBtn)
+        return
+
+    show := false
+    try {
+        if IsSet(CurrentTab)
+            show := (CurrentTab = "Tab4")
+    }
+    try LabRemoteWebhookBtn.Visible := show
 }
 
 LabRemoteEnsureWorker(*) {
@@ -61,10 +127,19 @@ LabRemoteEnsureWorker(*) {
         return
 
     worker := A_ScriptDir "\submacros\lab_discord_worker.ps1"
-    if !FileExist(worker)
+    if !FileExist(worker) {
+        LabRemoteLog("Discord worker missing: " worker)
         return
+    }
+
     cmd := 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' worker '" -InstallDir "' A_ScriptDir '"'
-    try Run(cmd, A_ScriptDir, "Hide", &LabRemoteWorkerPid)
+    try {
+        Run(cmd, A_ScriptDir, "Hide", &LabRemoteWorkerPid)
+        LabRemoteLog("Discord worker launched PID " LabRemoteWorkerPid)
+    } catch Error as err {
+        LabRemoteWorkerPid := 0
+        LabRemoteLog("Discord worker launch ERROR: " err.Message)
+    }
 }
 
 LabRemoteClearCommand(result := "", details := "") {
@@ -73,6 +148,7 @@ LabRemoteClearCommand(result := "", details := "") {
     if IsSet(RemoteCommandFile) && FileExist(RemoteCommandFile)
         commandId := IniRead(RemoteCommandFile, "Command", "Id", "")
     try FileDelete(RemoteCommandFile)
+
     if IsSet(StateFile) {
         if (commandId != "")
             try IniWrite(commandId, StateFile, "Remote", "LastCommandId")
@@ -86,6 +162,7 @@ LabRemoteResetSessionStats() {
     global StateFile, AutorunStartTime, CurrentRunCount, CurrentStratStartTime
     if !IsSet(StateFile)
         return
+
     for key in ["Coins", "Gems", "EXP", "TotalTriumphs", "TotalLosses", "TotalTimeSeconds", "Timescale", "CurrentRunCount"]
         try IniWrite(0, StateFile, "State", key)
     try IniWrite(A_TickCount, StateFile, "State", "CurrentStratStartTime")
@@ -110,6 +187,7 @@ LabRemoteApplyStrategyPath(path, loadNow := false) {
 
     Strategy1Path := path
     try Strategy1Ctrl.Text := path
+    try Strategy1Ctrl.Value := path
     try IniWrite(path, SettingsFile, "Options", "Strategy1")
     try IniWrite(path, StateFile, "State", "Strategy")
     return true
@@ -137,15 +215,13 @@ LabRemoteApplyStartupCommand(*) {
 
     LabRemoteResetSessionStats()
     LabRemoteClearCommand("start_accepted", strategy)
-    ; Upstream StartStrategy is StartStrategy(ctrl, *), so call it with the same
-    ; placeholder arguments used by the macro's F1 handler instead of a zero-arg timer.
+    ; Upstream StartStrategy is StartStrategy(ctrl, *), matching the F1 handler.
     try SetTimer((*) => StartStrategy(0, 0), -150)
     return true
 }
 
-; Called from the high-confidence between-match preflight hook. It is deliberately
-; never called from PlayStrategy(), so a Discord/network request cannot disturb tower
-; timings in the active match.
+; Called only from the high-confidence between-match preflight hook. Never consume a
+; Discord network request inside PlayStrategy(), where tower timing is sensitive.
 LabRemoteConsumeBetweenMatches(&switched, &stratName) {
     global RemoteCommandFile, RunningStrategy, RotateStrategies, CurrentStratStartTime, CurrentRunCount
     global StateFile
@@ -173,6 +249,7 @@ LabRemoteConsumeBetweenMatches(&switched, &stratName) {
                 LabRemoteClearCommand("error", "SWITCH strategy does not exist or could not load: " newStrat)
             return ""
         }
+
         switched := true
         stratName := newStrat
         try RotateStrategies := false
@@ -198,6 +275,7 @@ LabRemoteConsumeLabCommand(*) {
     global LabRemoteLabCommandFile, LabEditorRingMode
     if !FileExist(LabRemoteLabCommandFile)
         return
+
     action := StrLower(Trim(IniRead(LabRemoteLabCommandFile, "Command", "Action", "")))
     value := Trim(IniRead(LabRemoteLabCommandFile, "Command", "Value", ""))
     try FileDelete(LabRemoteLabCommandFile)
@@ -232,9 +310,9 @@ LabRemoteConsumeLabCommand(*) {
 }
 
 LabRemoteTick(*) {
-    LabRemoteEnsureWorker()
-    LabRemoteApplyStartupCommand()
-    LabRemoteConsumeLabCommand()
+    try LabRemoteEnsureWorker()
+    try LabRemoteApplyStartupCommand()
+    try LabRemoteConsumeLabCommand()
 }
 
 LabRemoteOnExit(*) {
@@ -244,5 +322,6 @@ LabRemoteOnExit(*) {
 }
 
 LabRemoteEnsureRoot()
+SetTimer(LabRemoteInstallWebhookEntry, -750)
 SetTimer(LabRemoteTick, 1000)
 OnExit(LabRemoteOnExit)
