@@ -91,9 +91,10 @@ LabSimpleFootprintsUpgradeUniqueMarker(index, entry) {
         return false
 
     point := StrategyEditorPlacementPoint(entry.placement)
-    ; Slightly larger than numbered badges so the cached portrait is actually useful,
-    ; while still staying far smaller than any footprint guide.
-    size := index = LabEditorSelectedRow ? 30 : 24
+    ; Keep the exact same geometry as ordinary markers. This is important: selection,
+    ; drag and zoom have one authoritative sizing path (18px / 22px selected), so a
+    ; background timer can never fight the interaction layer again.
+    size := index = LabEditorSelectedRow ? 22 : 18
     wasVisible := false
     oldHwnd := 0
     try wasVisible := entry.ctrl.Visible
@@ -146,19 +147,6 @@ LabSimpleFootprintsStyleEntry(entry) {
     }
 }
 
-LabSimpleFootprintsKeepUniqueMarkerSize(index, entry) {
-    global LabEditorSelectedRow
-    ready := false
-    try ready := entry.labUniquePortraitReady
-    if !ready || !IsObject(entry.ctrl)
-        return
-
-    point := StrategyEditorPlacementPoint(entry.placement)
-    size := index = LabEditorSelectedRow ? 30 : 24
-    try entry.ctrl.Move(point.x - Floor(size / 2), point.y - Floor(size / 2), size, size)
-    try StrategyEditorSetCircularRegion(entry.ctrl, size)
-}
-
 LabSimpleFootprintsApply(*) {
     global LabEditorDoc, LabEditorMarkerCtrls, LabEditorRingsBtn
     global LabEditorRingMode, LabSimpleFootprintsLastMode
@@ -173,11 +161,11 @@ LabSimpleFootprintsApply(*) {
         LabSimpleFootprintsStyleEntry(entry)
         if LabSimpleFootprintsUpgradeUniqueMarker(index, entry)
             changedMarker := true
-        LabSimpleFootprintsKeepUniqueMarkerSize(index, entry)
     }
 
     if changedMarker {
         ; One synchronization pass after an HWND replacement. No per-frame rebuilds.
+        try StrategyEditorRefreshMarkerSelection()
         try StrategyEditorApplyLayer()
     }
 
