@@ -14,6 +14,8 @@ global LabEditorPanStartY := 0
 global LabEditorPanStartCenterX := 0.5
 global LabEditorPanStartCenterY := 0.5
 global LabEditorPanLastRender := 0
+global LabEditorPanLastMouseX := ""
+global LabEditorPanLastMouseY := ""
 global LabEditorDirectNavInstallAttempts := 0
 global LabEditorWheelLastRender := 0
 
@@ -26,10 +28,43 @@ StrategyEditorIsActive() {
     return IsSet(LabEditorSnapshot) && IsObject(LabEditorSnapshot) && LabEditorSnapshot.Visible
 }
 
+; StrategyEditorRenderBackground swaps the Picture source after generating each
+; viewport JPEG. Native Static controls otherwise repaint the empty state between
+; those assignments, which is the flash visible while panning. WM_SETREDRAW lets us
+; finish the whole swap off-screen and invalidate exactly once at the end.
+StrategyEditorRenderBackgroundBuffered(repositionMarkers := true) {
+    global LabEditorSnapshot, LabEditorCanvasBg
+    suspended := []
+
+    for ctrl in [LabEditorSnapshot, LabEditorCanvasBg] {
+        if !IsObject(ctrl)
+            continue
+        hwnd := 0
+        try hwnd := ctrl.Hwnd
+        if !hwnd
+            continue
+        try {
+            DllCall("user32\SendMessageW", "Ptr", hwnd, "UInt", 0x000B, "Ptr", 0, "Ptr", 0, "Ptr") ; WM_SETREDRAW false
+            suspended.Push(hwnd)
+        }
+    }
+
+    result := false
+    try result := StrategyEditorRenderBackground(repositionMarkers)
+    finally {
+        for hwnd in suspended {
+            try DllCall("user32\SendMessageW", "Ptr", hwnd, "UInt", 0x000B, "Ptr", 1, "Ptr", 0, "Ptr") ; WM_SETREDRAW true
+            try DllCall("user32\RedrawWindow", "Ptr", hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x181) ; invalidate + all children + update now
+        }
+    }
+    return result
+}
+
 StrategyEditorDirectMouseDown(wParam, lParam, msg, hwnd) {
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
     global LabEditorPanActive, LabEditorPanStartX, LabEditorPanStartY
     global LabEditorPanStartCenterX, LabEditorPanStartCenterY, LabEditorPanLastRender
+    global LabEditorPanLastMouseX, LabEditorPanLastMouseY
     global LabEditorViewport, MainGui
 
     if !StrategyEditorIsActive()
@@ -50,6 +85,8 @@ StrategyEditorDirectMouseDown(wParam, lParam, msg, hwnd) {
     LabEditorPanStartCenterX := LabEditorViewport.CenterX
     LabEditorPanStartCenterY := LabEditorViewport.CenterY
     LabEditorPanLastRender := 0
+    LabEditorPanLastMouseX := mx
+    LabEditorPanLastMouseY := my
     DllCall("SetCapture", "Ptr", MainGui.Hwnd)
     return 0
 }
@@ -57,12 +94,18 @@ StrategyEditorDirectMouseDown(wParam, lParam, msg, hwnd) {
 StrategyEditorInteractiveMouseMove(wParam, lParam, msg, hwnd) {
     global LabEditorPanActive, LabEditorViewport
     global LabEditorPanStartX, LabEditorPanStartY, LabEditorPanStartCenterX, LabEditorPanStartCenterY
-    global LabEditorPanLastRender, LabEditorCanvasW, LabEditorCanvasH
+    global LabEditorPanLastRender, LabEditorPanLastMouseX, LabEditorPanLastMouseY
+    global LabEditorCanvasW, LabEditorCanvasH
 
     if !LabEditorPanActive
         return StrategyEditorMouseMove(wParam, lParam, msg, hwnd)
 
     StrategyEditorGetClientCursor(&mx, &my)
+    if (LabEditorPanLastMouseX != "" && mx = LabEditorPanLastMouseX && my = LabEditorPanLastMouseY)
+        return 0
+    LabEditorPanLastMouseX := mx
+    LabEditorPanLastMouseY := my
+
     visibleW := 1.0 / LabEditorViewport.Zoom
     visibleH := 1.0 / LabEditorViewport.Zoom
     dx := mx - LabEditorPanStartX
@@ -73,24 +116,25 @@ StrategyEditorInteractiveMouseMove(wParam, lParam, msg, hwnd) {
     LabEditorViewport.CenterY := LabEditorPanStartCenterY - (dy / Max(1, LabEditorCanvasH)) * visibleH
     LabEditorViewport.ClampCenter()
 
-    ; GDI+ viewport generation is the expensive part. Coalescing to ~42 FPS gives
-    ; noticeably smoother motion than the old 30 FPS path while avoiding a render
-    ; for every raw WM_MOUSEMOVE message.
+    ; Keep live navigation near 42 FPS. The important difference is that each frame
+    ; is now committed atomically instead of visibly clearing/reloading the Picture.
     if (!LabEditorPanLastRender || A_TickCount - LabEditorPanLastRender >= 24) {
         LabEditorPanLastRender := A_TickCount
-        StrategyEditorRenderBackground()
+        StrategyEditorRenderBackgroundBuffered()
     }
     return 0
 }
 
 StrategyEditorInteractiveMouseUp(wParam, lParam, msg, hwnd) {
-    global LabEditorPanActive
+    global LabEditorPanActive, LabEditorPanLastMouseX, LabEditorPanLastMouseY
     if !LabEditorPanActive
         return StrategyEditorMouseUp(wParam, lParam, msg, hwnd)
 
     LabEditorPanActive := false
+    LabEditorPanLastMouseX := ""
+    LabEditorPanLastMouseY := ""
     try DllCall("ReleaseCapture")
-    StrategyEditorRenderBackground()
+    StrategyEditorRenderBackgroundBuffered()
     return 0
 }
 
@@ -135,12 +179,12 @@ StrategyEditorInteractiveWheel(wParam, lParam, msg, hwnd) {
     LabEditorViewport.CenterY := anchorY - fy * newVisibleH + newVisibleH / 2
     LabEditorViewport.ClampCenter()
 
-    ; Wheel events are already discrete, but some touchpads emit them rapidly.
-    ; Skip impossible-to-see intermediate frames and always keep the latest viewport state.
+    ; Wheel events are discrete, but touchpads can burst. Coalesce impossible-to-see
+    ; intermediate states, then perform one buffered swap for the latest viewport.
     now := A_TickCount
     if (!LabEditorWheelLastRender || now - LabEditorWheelLastRender >= 16) {
         LabEditorWheelLastRender := now
-        StrategyEditorRenderBackground()
+        StrategyEditorRenderBackgroundBuffered()
     } else {
         SetTimer(StrategyEditorWheelFlush, -16)
     }
@@ -152,7 +196,7 @@ StrategyEditorWheelFlush(*) {
     if !StrategyEditorIsActive()
         return
     LabEditorWheelLastRender := A_TickCount
-    StrategyEditorRenderBackground()
+    StrategyEditorRenderBackgroundBuffered()
 }
 
 StrategyEditorInstallDirectNavigation(*) {
