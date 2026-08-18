@@ -205,13 +205,8 @@ StrategyEditorWorkspaceApply(rerender := false) {
     StrategyEditorWorkspaceDecorVisible(!LabEditorExpanded)
 
     if (geometryChanged || rerender) {
-        try {
-            if IsFunc(StrategyEditorRenderBackgroundBuffered)
-                StrategyEditorRenderBackgroundBuffered()
-            else
-                StrategyEditorRenderBackground()
-        } catch {
+        try StrategyEditorRenderBackgroundBuffered()
+        catch
             try StrategyEditorRenderBackground()
-        }
     }
 }
