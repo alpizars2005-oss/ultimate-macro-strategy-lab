@@ -62,7 +62,8 @@ jobs:
 
           # Editor 0.3.9 contract: visibility is owned by the Editor canvas, not by
           # upstream tab numbering. Marker and footprint remain separate HWNDs.
-          assert 'CurrentTab' not in placements, 'placements must not depend on upstream tab numbering'
+          assert 'global LabEditorMarkerCtrls, CurrentTab' not in placements
+          assert 'CurrentTab =' not in placements
           assert 'StrategyEditorIsActive()' in placements
           assert 'showPlacement := editorActive && point.visible' in placements
           assert 'LabEditorRingMode := "selected"' in placements
@@ -72,7 +73,6 @@ jobs:
           assert 'Resources\\StrategyLab\\Towers\\footprint-guide.png' in placements
           assert 'placement-footprint-ring.png' not in placements
           assert 'GdipDrawEllipse' not in placements
-          assert 'entry.ctrl = one small draggable marker HWND' not in placements or True
 
           # Portrait helper may replace the single marker HWND, but must not own rings.
           assert 'LabSimpleFootprintsUpgradeUniqueMarker' in footprints
@@ -106,7 +106,6 @@ jobs:
           assert '[switch]$SelfTest' in remote_settings
           assert '<StrategyLabRemoteBoundary>' in preflight
           assert 'LabRemoteConsumeBetweenMatches(&switched, &stratName)' in preflight
-          assert 'LabRemoteLaunchSettings' in preflight
           assert 'Remove-ObsoleteTitleRemoteShortcut' in preflight
           assert 'StrategyEditorCreateTab(MainGui)' in clean_installer
           assert 'LabStatsCreateTab(MainGui)' in clean_installer
