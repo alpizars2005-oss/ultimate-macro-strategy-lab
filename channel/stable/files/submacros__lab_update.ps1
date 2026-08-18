@@ -2,7 +2,9 @@ param(
     [Parameter(Mandatory=$true)][string]$InstallDir,
     [Parameter(Mandatory=$true)][string]$CacheDir,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
-    [Parameter(Mandatory=$true)][int]$ParentPid
+    [Parameter(Mandatory=$true)][int]$ParentPid,
+    [string]$LauncherPath = '',
+    [string]$EntryScript = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,6 +21,46 @@ function Show-Message([string]$Text, [string]$Title='Strategy Lab Update') {
         Add-Type -AssemblyName PresentationFramework
         [System.Windows.MessageBox]::Show($Text, $Title) | Out-Null
     } catch {}
+}
+
+function Restart-StrategyLab {
+    $runLab = Join-Path $InstallDir 'run_lab.bat'
+    if (Test-Path -LiteralPath $runLab -PathType Leaf) {
+        try {
+            Start-Process -FilePath $runLab -WorkingDirectory $InstallDir | Out-Null
+            Log "Restarted Strategy Lab through run_lab.bat."
+            return $true
+        } catch {
+            Log ('run_lab.bat restart failed: ' + $_.Exception.Message)
+        }
+    }
+
+    if (![string]::IsNullOrWhiteSpace($LauncherPath) -and
+        ![string]::IsNullOrWhiteSpace($EntryScript) -and
+        (Test-Path -LiteralPath $LauncherPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $EntryScript -PathType Leaf)) {
+        try {
+            Start-Process -FilePath $LauncherPath -ArgumentList @('"' + $EntryScript + '"') -WorkingDirectory $InstallDir | Out-Null
+            Log "Restarted Strategy Lab through the current AutoHotkey executable."
+            return $true
+        } catch {
+            Log ('AutoHotkey restart failed: ' + $_.Exception.Message)
+        }
+    }
+
+    $mainLab = Join-Path $InstallDir 'Main_Lab.ahk'
+    if (Test-Path -LiteralPath $mainLab -PathType Leaf) {
+        try {
+            Start-Process -FilePath $mainLab -WorkingDirectory $InstallDir | Out-Null
+            Log "Restarted Strategy Lab through Main_Lab.ahk shell association."
+            return $true
+        } catch {
+            Log ('Main_Lab.ahk restart failed: ' + $_.Exception.Message)
+        }
+    }
+
+    Log 'Could not find a working Strategy Lab restart path.'
+    return $false
 }
 
 try {
@@ -121,10 +163,13 @@ try {
     $installedVersion = Join-Path $InstallDir 'lab_version.ini'
     [IO.File]::WriteAllText($installedVersion, "[Lab]`r`nVersion=$ExpectedVersion`r`n", (New-Object Text.UTF8Encoding($false)))
     Log "Updated Strategy Lab to $ExpectedVersion ($($entries.Count) files)."
-    Start-Process -FilePath (Join-Path $InstallDir 'run_lab.bat') -WorkingDirectory $InstallDir
+
+    if (!(Restart-StrategyLab)) {
+        Show-Message "Strategy Lab updated successfully, but Windows did not relaunch it automatically. Please open it once manually. Future attempts will keep using the saved restart paths."
+    }
 } catch {
     Log ('UPDATE FAILED: ' + $_.Exception.Message)
     Show-Message ("Strategy Lab update failed safely. Your previous files were preserved/restored.`n`n" + $_.Exception.Message)
-    try { Start-Process -FilePath (Join-Path $InstallDir 'run_lab.bat') -WorkingDirectory $InstallDir } catch {}
+    try { Restart-StrategyLab | Out-Null } catch {}
     exit 1
 }
