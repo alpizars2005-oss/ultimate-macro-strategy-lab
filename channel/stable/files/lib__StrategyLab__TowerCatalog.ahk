@@ -1,5 +1,7 @@
 #Requires AutoHotkey v2.0
 
+global LabTowerResolvedPortraitCache := Map()
+
 LabTowerSafeKey(value) {
     key := StrLower(Trim(String(value)))
     key := RegExReplace(key, "[^a-z0-9]+", "-")
@@ -75,13 +77,24 @@ LabTowerImageUsable(path) {
 }
 
 LabTowerCachedPortraitPath(towerName) {
+    global LabTowerResolvedPortraitCache
     entry := LabTowerResolve(towerName)
+
+    if LabTowerResolvedPortraitCache.Has(entry.key) {
+        cachedPath := LabTowerResolvedPortraitCache[entry.key]
+        if FileExist(cachedPath)
+            return cachedPath
+        LabTowerResolvedPortraitCache.Delete(entry.key)
+    }
+
     for ext in ["png", "jpg", "jpeg", "bmp"] {
         path := LabTowerPortraitDir() "\" entry.key "." ext
         if !FileExist(path)
             continue
-        if LabTowerImageUsable(path)
+        if LabTowerImageUsable(path) {
+            LabTowerResolvedPortraitCache[entry.key] := path
             return path
+        }
         try FileDelete(path)
     }
     return ""
@@ -98,19 +111,19 @@ LabTowerPreparePreview(sourcePath, key) {
     preview := LabTowerPreviewDir() "\" key ".jpg"
     sourceStamp := ""
     previewStamp := ""
+    previewSize := 0
     try sourceStamp := FileGetTime(sourcePath, "M")
     try previewStamp := FileGetTime(preview, "M")
-    if FileExist(preview) && previewStamp != "" && sourceStamp != "" && previewStamp >= sourceStamp {
-        try {
-            if FileGetSize(preview) >= 1500 && LabTowerImageUsable(preview)
-                return preview
-        }
-    }
+    try previewSize := FileGetSize(preview)
+    if FileExist(preview) && previewStamp != "" && sourceStamp != ""
+        && previewStamp >= sourceStamp && previewSize >= 1500
+        return preview
 
     pSource := 0
     pCanvas := 0
     graphics := 0
     brush := 0
+    temp := preview ".tmp.jpg"
     try {
         pSource := Gdip_CreateBitmapFromFile(sourcePath)
         if !pSource
@@ -140,7 +153,6 @@ LabTowerPreparePreview(sourcePath, key) {
         DllCall("gdiplus\GdipSetInterpolationMode", "Ptr", graphics, "Int", 7)
         Gdip_DrawImage(graphics, pSource, drawX, drawY, drawW, drawH, 0, 0, sourceW, sourceH)
 
-        temp := preview ".tmp.jpg"
         if FileExist(temp)
             try FileDelete(temp)
         Gdip_SaveBitmapToFile(pCanvas, temp, 90)
@@ -149,7 +161,7 @@ LabTowerPreparePreview(sourcePath, key) {
         if FileExist(preview)
             FileDelete(preview)
         FileMove(temp, preview, 1)
-        return LabTowerImageUsable(preview) ? preview : ""
+        return preview
     } catch {
         return ""
     } finally {
@@ -161,6 +173,8 @@ LabTowerPreparePreview(sourcePath, key) {
             try Gdip_DisposeImage(pCanvas)
         if pSource
             try Gdip_DisposeImage(pSource)
+        if FileExist(temp)
+            try FileDelete(temp)
     }
 }
 
