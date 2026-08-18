@@ -2,15 +2,16 @@
 
 ; Conservative .strat document editor.
 ; It only rewrites the first two arguments of a selected SpawnTower line.
-; Every other line remains byte-for-byte equivalent apart from newline normalization
-; when the file is intentionally saved.
+; Every other line remains equivalent apart from newline normalization when the file
+; is intentionally saved. The original UTF-8/UTF-16 encoding is preserved.
 
 class LabStratDocument {
     __New(path) {
         if !FileExist(path)
             throw Error("Strategy file does not exist.")
         this.Path := path
-        this.Text := FileRead(path, "UTF-8")
+        this.Encoding := ""
+        this.Text := LabStrategyReadText(path, &this.Encoding)
         this.Newline := InStr(this.Text, "`r`n") ? "`r`n" : "`n"
         normalized := StrReplace(this.Text, "`r")
         this.Lines := StrSplit(normalized, "`n")
@@ -150,7 +151,7 @@ class LabStratDocument {
     SaveCopy(path) {
         if FileExist(path)
             FileDelete(path)
-        FileAppend(this.RenderText(), path, "UTF-8-RAW")
+        FileAppend(this.RenderText(), path, this.Encoding)
         return path
     }
 
@@ -163,7 +164,7 @@ class LabStratDocument {
         temp := this.Path ".strategy-lab.tmp"
         if FileExist(temp)
             FileDelete(temp)
-        FileAppend(this.RenderText(), temp, "UTF-8-RAW")
+        FileAppend(this.RenderText(), temp, this.Encoding)
         FileMove(temp, this.Path, 1)
         this.Dirty := false
         return backup
