@@ -120,7 +120,10 @@ StrategyEditorSetBackground(path, mode := "snapshot") {
     return true
 }
 
-StrategyEditorRenderBackground() {
+; Rendering the bitmap and rebuilding the native ListView used to happen together.
+; Pan/zoom/layout changes only need marker repositioning, so the hot path now avoids
+; expensive row deletion/reinsertion and stays much closer to display refresh rate.
+StrategyEditorRenderBackground(repositionMarkers := true) {
     global LabEditorSourceImage, LabEditorViewport, LabEditorViewportPath
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
     global LabEditorSnapshot, LabEditorCanvasBg, LabEditorCanvasHint, LabEditorZoomLabel
@@ -132,7 +135,8 @@ StrategyEditorRenderBackground() {
         LabEditorCanvasHint.Move(LabEditorCanvasX + 44, LabEditorCanvasY + Floor(LabEditorCanvasH / 2) - 26,
             Max(220, LabEditorCanvasW - 88), 52)
         LabEditorZoomLabel.Text := "100%"
-        StrategyEditorRefreshVisuals()
+        if repositionMarkers
+            try StrategyEditorRefreshMarkerLayout()
         return false
     }
 
@@ -140,6 +144,8 @@ StrategyEditorRenderBackground() {
     if !DirExist(dir)
         DirCreate(dir)
     if LabMapRenderViewport(LabEditorSourceImage, LabEditorViewport, LabEditorViewportPath, LabEditorCanvasW, LabEditorCanvasH) {
+        ; Clearing Value first forces native Picture to release the old frame before
+        ; the next cached viewport is loaded, preventing stale-frame flashes.
         LabEditorSnapshot.Value := ""
         LabEditorSnapshot.Value := LabEditorViewportPath
         LabEditorSnapshot.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
@@ -147,7 +153,8 @@ StrategyEditorRenderBackground() {
         LabEditorCanvasBg.Visible := false
         LabEditorCanvasHint.Visible := false
         LabEditorZoomLabel.Text := Round(LabEditorViewport.Zoom * 100) "%"
-        StrategyEditorRefreshVisuals()
+        if repositionMarkers
+            try StrategyEditorRefreshMarkerLayout()
         return true
     }
 
@@ -155,6 +162,8 @@ StrategyEditorRenderBackground() {
     LabEditorCanvasBg.Visible := true
     LabEditorCanvasHint.Text := "The cached image could not be rendered.`nRun Sync Assets again or Capture Roblox."
     LabEditorCanvasHint.Visible := true
+    if repositionMarkers
+        try StrategyEditorRefreshMarkerLayout()
     return false
 }
 
@@ -184,14 +193,12 @@ StrategyEditorZoom(delta) {
     global LabEditorViewport
     LabEditorViewport.ZoomBy(delta)
     StrategyEditorRenderBackground()
-    StrategyEditorRefreshVisuals()
 }
 
 StrategyEditorZoomReset(*) {
     global LabEditorViewport
     LabEditorViewport.Reset()
     StrategyEditorRenderBackground()
-    StrategyEditorRefreshVisuals()
 }
 
 StrategyEditorPan(dx, dy) {
@@ -200,7 +207,6 @@ StrategyEditorPan(dx, dy) {
         return
     LabEditorViewport.Pan(dx, dy)
     StrategyEditorRenderBackground()
-    StrategyEditorRefreshVisuals()
 }
 
 StrategyEditorMouseWheel(wParam, lParam, msg, hwnd) {
@@ -214,7 +220,7 @@ StrategyEditorMouseWheel(wParam, lParam, msg, hwnd) {
     delta := (wParam >> 16) & 0xFFFF
     if (delta > 32767)
         delta -= 65536
-    StrategyEditorZoom(delta > 0 ? 0.25 : -0.25)
+    StrategyEditorZoom((delta / 120.0) * 0.15)
     return 0
 }
 
@@ -223,6 +229,7 @@ StrategyEditorToggleExpanded(*) {
     global LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList, LabEditorCoordLabel, LabEditorDirtyLabel
     global LabEditorXCtrl, LabEditorYCtrl, LabEditorApplyBtn, LabEditorSaveBtn, LabEditorOverwriteBtn
     global LabEditorDirty, LabEditorStatus, LabEditorSnapshot, LabEditorCanvasBg, LabEditorCanvasHint, LabEditorInfoPanel
+
     LabEditorExpanded := !LabEditorExpanded
     if LabEditorExpanded {
         LabEditorCanvasW := 650
@@ -241,12 +248,19 @@ StrategyEditorToggleExpanded(*) {
             LabEditorSaveBtn, LabEditorOverwriteBtn, LabEditorDirty, LabEditorStatus]
             ctrl.Visible := true
     }
+
+    ; StrategyEditorWorkspaceApply upgrades these fallback dimensions to the roomy
+    ; editor workspace immediately, without waiting for the workspace monitor tick.
+    try {
+        StrategyEditorWorkspaceApply(true)
+        return
+    }
+
     LabEditorCanvasBg.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
     LabEditorSnapshot.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
     LabEditorCanvasHint.Move(LabEditorCanvasX + 44, LabEditorCanvasY + Floor(LabEditorCanvasH / 2) - 26,
         Max(220, LabEditorCanvasW - 88), 52)
     StrategyEditorRenderBackground()
-    StrategyEditorRefreshVisuals()
 }
 
 StrategyEditorShowTower(placement) {
@@ -338,12 +352,14 @@ StrategyEditorAssetSyncPoll(*) {
     maps := 0
     misses := 0
     errors := 0
+    optimized := 0
     statusPath := A_AppData "\Ultimate_Macro\StrategyEditor\asset-sync-status.ini"
     if FileExist(statusPath) {
         try towers := Integer(IniRead(statusPath, "Sync", "Towers", 0))
         try maps := Integer(IniRead(statusPath, "Sync", "Maps", 0))
         try misses := Integer(IniRead(statusPath, "Sync", "Misses", 0))
         try errors := Integer(IniRead(statusPath, "Sync", "Errors", 0))
+        try optimized := Integer(IniRead(statusPath, "Sync", "Optimized", 0))
     }
 
     if IsObject(LabEditorDoc) {
@@ -352,7 +368,6 @@ StrategyEditorAssetSyncPoll(*) {
         if (selected > 0)
             StrategyEditorSelectPlacement(selected)
     }
-    StrategyEditorRenderBackground()
 
     if (towers > 0 || maps > 0)
         LabEditorAssetBadge.Text := "Assets: " towers " tower" (towers = 1 ? "" : "s") " • " maps " map" (maps = 1 ? "" : "s")
@@ -361,5 +376,6 @@ StrategyEditorAssetSyncPoll(*) {
     else
         LabEditorAssetBadge.Text := StrategyEditorAssetsMissing() ? "Assets: incomplete" : "Assets: ready"
 
-    StrategyEditorSetStatus("Asset sync complete: " towers " tower portrait(s), " maps " map reference(s), " misses " miss(es), " errors " error(s). " StrategyEditorBackgroundDescription())
+    StrategyEditorSetStatus("Asset sync complete: " towers " tower portrait(s), " maps " map reference(s), " misses " miss(es), " errors " error(s)"
+        . (optimized > 0 ? ", " optimized " optimized local image(s)" : "") ". " StrategyEditorBackgroundDescription())
 }
