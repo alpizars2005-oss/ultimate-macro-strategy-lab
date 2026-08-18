@@ -1,4 +1,4 @@
-# Strategy Lab stable delivery map 0.3.5 reliability pass
+# Strategy Lab stable delivery map 0.3.7 remote + footprint reliability pass
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 run_lab.bat|channel/stable/files/run_lab.bat|raw
@@ -10,6 +10,7 @@ lib/StrategyLab/StrategyEditorCore.ahk|channel/stable/files/lib__StrategyLab__St
 lib/StrategyLab/StrategyEditorTab.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorTab.ahk|raw
 lib/StrategyLab/StrategyEditorUi.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorUi.ahk|raw
 lib/StrategyLab/StrategyEditorPlacements.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorPlacements.ahk|raw
+lib/StrategyLab/LabSimpleFootprints.ahk|channel/stable/files/lib__StrategyLab__LabSimpleFootprints.ahk|raw
 lib/StrategyLab/StrategyEditorMaps.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorMaps.ahk|raw
 lib/StrategyLab/StrategyEditorInteraction.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorInteraction.ahk|raw
 lib/StrategyLab/StrategyEditorWorkspace.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorWorkspace.ahk|raw
