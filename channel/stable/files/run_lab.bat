@@ -3,7 +3,10 @@ setlocal
 cd /d "%~dp0"
 
 if exist "submacros\lab_preflight.ps1" (
-  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "submacros\lab_preflight.ps1" -InstallDir "%~dp0"
+  rem %~dp0 ends with a backslash. Passing that directly as a quoted PowerShell
+  rem argument can turn the closing quote into part of the argument on Windows.
+  rem After cd /d, %CD% is the same folder without the dangerous trailing slash.
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "submacros\lab_preflight.ps1" -InstallDir "%CD%"
   if errorlevel 1 (
     echo.
     echo Strategy Lab preflight detected a problem it could not safely repair.
