@@ -100,6 +100,7 @@ StrategyEditorInteractiveWheel(wParam, lParam, msg, hwnd) {
     if (newZoom = oldZoom)
         return 0
 
+    ; Keep the point under the mouse anchored while zooming.
     fx := (mx - LabEditorCanvasX) / Max(1, LabEditorCanvasW)
     fy := (my - LabEditorCanvasY) / Max(1, LabEditorCanvasH)
     oldVisibleW := 1.0 / oldZoom
@@ -132,14 +133,40 @@ StrategyEditorInstallDirectNavigation(*) {
         return
     }
 
-    ; Keep legacy controls alive for compatibility but move/disable them permanently.
+    StrategyEditorHideLegacyPanButtons()
+    try LabEditorSyncBtn.Move(228, 174, 86, 24)
+}
+
+StrategyEditorHideLegacyPanButtons() {
+    global LabEditorPanLeftBtn, LabEditorPanUpBtn, LabEditorPanDownBtn, LabEditorPanRightBtn
+    if !IsSet(LabEditorPanLeftBtn) || !IsObject(LabEditorPanLeftBtn)
+        return
+    ; Keep the old controls alive for compatibility, but direct manipulation replaces them.
     for ctrl in [LabEditorPanLeftBtn, LabEditorPanUpBtn, LabEditorPanDownBtn, LabEditorPanRightBtn] {
         ctrl.Enabled := false
         ctrl.Move(-1000, -1000, 1, 1)
     }
+}
 
-    ; Reclaim the toolbar space for the useful action.
-    try LabEditorSyncBtn.Move(228, 174, 86, 24)
+StrategyEditorInteractiveStateGuard(*) {
+    global CurrentTab, LabEditorDoc, LabEditorSelectedRow, LabEditorDirty
+    if (CurrentTab != "Tab7")
+        return
+
+    ; StrategyEditorShow() can make all legacy controls visible again; their off-screen
+    ; position remains permanent, and this guard keeps them disabled too.
+    StrategyEditorHideLegacyPanButtons()
+
+    if !IsObject(LabEditorDoc)
+        return
+
+    if (LabEditorSelectedRow < 1 && LabEditorDoc.Placements.Length > 0)
+        StrategyEditorSelectPlacement(1)
+
+    ; Recover from stale empty-state text after asynchronous asset/UI refreshes.
+    if (LabEditorDirty.Text = "No strategy loaded.")
+        StrategyEditorRefreshDirty()
 }
 
 SetTimer(StrategyEditorInstallDirectNavigation, -250)
+SetTimer(StrategyEditorInteractiveStateGuard, 600)
