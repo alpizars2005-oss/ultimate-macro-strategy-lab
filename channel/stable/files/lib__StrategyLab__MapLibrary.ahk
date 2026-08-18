@@ -4,6 +4,12 @@
 ; A camera capture made by Ultimate Macro is authoritative for SpawnTower editing.
 ; Wiki top-down images are reference-only until a future projective calibration is saved.
 
+; Keep the active source bitmap decoded while the user pans/zooms. Previously every
+; frame validated the image and decoded it again, which meant two disk/decode passes
+; per render. This cache is invalidated automatically when the file timestamp/size changes.
+global LabMapRenderCache := {path: "", stamp: "", size: 0, bitmap: 0, width: 0, height: 0}
+OnExit(LabMapReleaseRenderCache)
+
 LabMapSafeKey(value) {
     key := StrLower(Trim(String(value)))
     key := RegExReplace(key, "[^a-z0-9]+", "-")
@@ -126,7 +132,68 @@ LabMapSaveCameraCapture(mapName, sourcePath) {
         return ""
     target := LabMapCameraDir() "\" entry.key ".png"
     FileCopy(sourcePath, target, true)
+    ; If this map was currently cached, force the next render to decode the new capture.
+    LabMapInvalidateRenderCache(target)
     return LabMapImageUsable(target) ? target : ""
+}
+
+LabMapInvalidateRenderCache(path := "") {
+    global LabMapRenderCache
+    if (path != "" && LabMapRenderCache.path != path)
+        return
+    LabMapReleaseRenderCache()
+}
+
+LabMapReleaseRenderCache(*) {
+    global LabMapRenderCache
+    if IsObject(LabMapRenderCache) && LabMapRenderCache.bitmap
+        try Gdip_DisposeImage(LabMapRenderCache.bitmap)
+    LabMapRenderCache := {path: "", stamp: "", size: 0, bitmap: 0, width: 0, height: 0}
+}
+
+LabMapAcquireRenderBitmap(path, &width, &height) {
+    global LabMapRenderCache
+    width := 0
+    height := 0
+    if (path = "" || !FileExist(path))
+        return 0
+
+    stamp := ""
+    size := 0
+    try stamp := FileGetTime(path, "M")
+    try size := FileGetSize(path)
+
+    if (LabMapRenderCache.bitmap
+        && LabMapRenderCache.path = path
+        && LabMapRenderCache.stamp = stamp
+        && LabMapRenderCache.size = size) {
+        width := LabMapRenderCache.width
+        height := LabMapRenderCache.height
+        return LabMapRenderCache.bitmap
+    }
+
+    LabMapReleaseRenderCache()
+    pBitmap := 0
+    try pBitmap := Gdip_CreateBitmapFromFile(path)
+    if !pBitmap
+        return 0
+
+    width := Gdip_GetImageWidth(pBitmap)
+    height := Gdip_GetImageHeight(pBitmap)
+    if (width <= 0 || height <= 0) {
+        try Gdip_DisposeImage(pBitmap)
+        return 0
+    }
+
+    LabMapRenderCache := {
+        path: path,
+        stamp: stamp,
+        size: size,
+        bitmap: pBitmap,
+        width: width,
+        height: height
+    }
+    return pBitmap
 }
 
 class LabMapViewport {
@@ -201,18 +268,13 @@ class LabMapViewport {
 }
 
 LabMapRenderViewport(sourcePath, viewport, outputPath, width, height) {
-    if (sourcePath = "" || !LabMapImageUsable(sourcePath))
+    pSource := LabMapAcquireRenderBitmap(sourcePath, &sourceW, &sourceH)
+    if !pSource || sourceW <= 0 || sourceH <= 0
         return false
-    pSource := Gdip_CreateBitmapFromFile(sourcePath)
-    if !pSource
-        return false
+
     pOut := 0
     graphics := 0
     try {
-        sourceW := Gdip_GetImageWidth(pSource)
-        sourceH := Gdip_GetImageHeight(pSource)
-        if (sourceW <= 0 || sourceH <= 0)
-            return false
         rect := viewport.SourceRect(sourceW, sourceH)
         pOut := Gdip_CreateBitmap(width, height)
         if !pOut
@@ -222,14 +284,15 @@ LabMapRenderViewport(sourcePath, viewport, outputPath, width, height) {
             return false
         DllCall("gdiplus\GdipSetInterpolationMode", "Ptr", graphics, "Int", 7)
         Gdip_DrawImage(graphics, pSource, 0, 0, width, height, rect.x, rect.y, rect.w, rect.h)
-        Gdip_SaveBitmapToFile(pOut, outputPath, 92)
+        ; The live viewport is transient. JPEG 84 is visually clean at editor size and
+        ; much cheaper to encode/write than the old PNG frame path.
+        Gdip_SaveBitmapToFile(pOut, outputPath, 84)
         return FileExist(outputPath)
     } finally {
         if graphics
             try Gdip_DeleteGraphics(graphics)
         if pOut
             try Gdip_DisposeImage(pOut)
-        if pSource
-            try Gdip_DisposeImage(pSource)
+        ; pSource belongs to LabMapRenderCache and stays decoded for the next frame.
     }
 }
