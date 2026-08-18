@@ -8,7 +8,6 @@ global RemoteCommandFile := A_AppData "\Ultimate_Macro\remote_command.ini"
 global LabRemoteRoot := A_AppData "\Ultimate_Macro\StrategyEditor"
 global LabRemoteConfig := LabRemoteRoot "\remote.ini"
 global LabRemoteWorkerPid := 0
-global LabRemoteLastConfigCheck := 0
 global LabRemoteLabCommandFile := LabRemoteRoot "\lab_remote_command.ini"
 
 LabRemoteEnsureRoot() {
@@ -35,8 +34,12 @@ LabRemoteLaunchSettings(*) {
 
 LabRemoteEnsureWorker(*) {
     global LabRemoteWorkerPid
-    if !LabRemoteEnabled()
+    if !LabRemoteEnabled() {
+        if (LabRemoteWorkerPid && ProcessExist(LabRemoteWorkerPid))
+            try ProcessClose(LabRemoteWorkerPid)
+        LabRemoteWorkerPid := 0
         return
+    }
 
     if (LabRemoteWorkerPid && ProcessExist(LabRemoteWorkerPid))
         return
@@ -63,10 +66,32 @@ LabRemoteClearCommand(result := "", details := "") {
     }
 }
 
-LabRemoteApplyStrategyPath(path) {
+LabRemoteResetSessionStats() {
+    global StateFile, AutorunStartTime, CurrentRunCount, CurrentStratStartTime
+    if !IsSet(StateFile)
+        return
+    for key in ["Coins", "Gems", "EXP", "TotalTriumphs", "TotalLosses", "TotalTimeSeconds", "Timescale", "CurrentRunCount"]
+        try IniWrite(0, StateFile, "State", key)
+    try IniWrite(A_TickCount, StateFile, "State", "CurrentStratStartTime")
+    try IniWrite(0, StateFile, "State", "StartTime")
+    try CurrentRunCount := 0
+    try CurrentStratStartTime := A_TickCount
+    try AutorunStartTime := 0
+}
+
+LabRemoteApplyStrategyPath(path, loadNow := false) {
     global Strategy1Path, Strategy1Ctrl, SettingsFile, StateFile
     if (path = "" || !FileExist(path))
         return false
+
+    if loadNow {
+        try LoadStrategyFile(path)
+        catch Error as err {
+            LabRemoteClearCommand("error", "Could not load strategy: " err.Message)
+            return false
+        }
+    }
+
     Strategy1Path := path
     try Strategy1Ctrl.Text := path
     try IniWrite(path, SettingsFile, "Options", "Strategy1")
@@ -88,20 +113,24 @@ LabRemoteApplyStartupCommand(*) {
         return false
 
     strategy := Trim(IniRead(RemoteCommandFile, "Command", "Strategy", ""))
-    if !LabRemoteApplyStrategyPath(strategy) {
-        LabRemoteClearCommand("error", "START strategy does not exist: " strategy)
+    if !LabRemoteApplyStrategyPath(strategy, true) {
+        if FileExist(RemoteCommandFile)
+            LabRemoteClearCommand("error", "START strategy does not exist or could not load: " strategy)
         return false
     }
 
+    LabRemoteResetSessionStats()
     LabRemoteClearCommand("start_accepted", strategy)
     try SetTimer(StartStrategy, -150)
     return true
 }
 
-; Called from the high-confidence between-match preflight hook. Keep this function
-; side-effect free inside actual strategy playback: it is never called by PlayStrategy().
+; Called from the high-confidence between-match preflight hook. It is deliberately
+; never called from PlayStrategy(), so a Discord/network request cannot disturb tower
+; timings in the active match.
 LabRemoteConsumeBetweenMatches(&switched, &stratName) {
     global RemoteCommandFile, RunningStrategy, RotateStrategies, CurrentStratStartTime, CurrentRunCount
+    global StateFile
     if !IsSet(RemoteCommandFile) || !FileExist(RemoteCommandFile)
         return ""
 
@@ -110,16 +139,20 @@ LabRemoteConsumeBetweenMatches(&switched, &stratName) {
         return ""
 
     if (action = "stop" || action = "pause") {
-        LabRemoteClearCommand("stopped_safe", stratName)
+        current := stratName
+        try IniWrite(0, StateFile, "State", "Running")
         try RunningStrategy := false
+        try KillSubmacros()
         try LabReleaseHeldInputs()
+        LabRemoteClearCommand("stopped_safe", current)
         return "stop"
     }
 
     if (action = "switch") {
         newStrat := Trim(IniRead(RemoteCommandFile, "Command", "Strategy", ""))
-        if !LabRemoteApplyStrategyPath(newStrat) {
-            LabRemoteClearCommand("error", "SWITCH strategy does not exist: " newStrat)
+        if !LabRemoteApplyStrategyPath(newStrat, true) {
+            if FileExist(RemoteCommandFile)
+                LabRemoteClearCommand("error", "SWITCH strategy does not exist or could not load: " newStrat)
             return ""
         }
         switched := true
@@ -127,7 +160,9 @@ LabRemoteConsumeBetweenMatches(&switched, &stratName) {
         try RotateStrategies := false
         try CurrentStratStartTime := A_TickCount
         try CurrentRunCount := 0
-        LabRemoteClearCommand("switch_accepted", newStrat)
+        try IniWrite(1, StateFile, "State", "Running")
+        try IniWrite(0, StateFile, "State", "CurrentRunCount")
+        LabRemoteClearCommand("switched_safe", newStrat)
         return "switch"
     }
 
@@ -137,6 +172,7 @@ LabRemoteConsumeBetweenMatches(&switched, &stratName) {
         return "stop"
     }
 
+    LabRemoteClearCommand("error", "Unknown remote action: " action)
     return ""
 }
 
@@ -183,5 +219,12 @@ LabRemoteTick(*) {
     LabRemoteConsumeLabCommand()
 }
 
+LabRemoteOnExit(*) {
+    global LabRemoteWorkerPid
+    if (LabRemoteWorkerPid && ProcessExist(LabRemoteWorkerPid))
+        try ProcessClose(LabRemoteWorkerPid)
+}
+
 LabRemoteEnsureRoot()
 SetTimer(LabRemoteTick, 1000)
+OnExit(LabRemoteOnExit)
