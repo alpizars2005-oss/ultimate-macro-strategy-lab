@@ -6,12 +6,17 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$ua = 'UltimateMacroStrategyLab/0.2 (private development; TDS Wiki asset cache)'
+$ua = 'UltimateMacroStrategyLab/0.2.4 (private development; TDS Wiki asset cache)'
 $root = Join-Path $env:APPDATA 'Ultimate_Macro\StrategyEditor'
 $towerDir = Join-Path $root 'TowerLibrary'
 $mapDir = Join-Path $root 'MapLibrary\reference'
 New-Item -ItemType Directory -Force -Path $towerDir,$mapDir | Out-Null
 $logPath = Join-Path $root 'asset-sync.log'
+$statusPath = Join-Path $root 'asset-sync-status.ini'
+$towerOK = 0
+$mapOK = 0
+$misses = 0
+$errors = 0
 
 function Log([string]$Text) {
     Add-Content -LiteralPath $logPath -Encoding UTF8 -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $Text)
@@ -51,14 +56,33 @@ function Invoke-Wiki([hashtable]$Params) {
     return Invoke-RestMethod -Uri $uri -Headers @{ 'User-Agent'=$ua; 'Accept'='application/json' } -TimeoutSec 25
 }
 
-function Download-Url([string]$Url,[string]$Target) {
-    $tmp = $Target + '.download'
+function Remove-OldImageVariants([string]$BasePath) {
+    foreach ($ext in @('.png','.jpg','.jpeg','.bmp')) {
+        Remove-Item -LiteralPath ($BasePath + $ext) -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Download-Image([string]$Url,[string]$BasePath) {
+    $tmp = $BasePath + '.download'
     Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-    Invoke-WebRequest -Uri $Url -OutFile $tmp -Headers @{ 'User-Agent'=$ua } -TimeoutSec 45
+    $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $tmp -PassThru -Headers @{ 'User-Agent'=$ua; 'Accept'='image/png,image/jpeg,image/*;q=0.8' } -TimeoutSec 45
     if (!(Test-Path -LiteralPath $tmp) -or (Get-Item -LiteralPath $tmp).Length -lt 200) {
         throw "Downloaded asset is empty: $Url"
     }
-    Move-Item -LiteralPath $tmp -Destination $Target -Force
+
+    $contentType = [string]$response.Headers['Content-Type']
+    $ext = '.png'
+    if ($contentType -match 'jpe?g') { $ext = '.jpg' }
+    elseif ($contentType -match 'bmp') { $ext = '.bmp' }
+    elseif ($contentType -match 'webp') {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        throw 'Wiki returned WebP; this build only caches Windows/GDI+ compatible PNG/JPEG assets.'
+    }
+
+    Remove-OldImageVariants $BasePath
+    $target = $BasePath + $ext
+    Move-Item -LiteralPath $tmp -Destination $target -Force
+    return $target
 }
 
 function Get-PageThumbnail([string]$Page,[int]$Width=128) {
@@ -96,9 +120,9 @@ function Choose-TopDown([string]$MapName,[string[]]$Titles) {
         $name = $title -replace '^File:',''
         $flat = ($name -replace '[^A-Za-z0-9]','').ToLowerInvariant()
         $score = 0
-        if ($name -match '(?i)top[ _-]*down|topdown|overhead|bird.?s.?eye') { $score += 100 }
-        if ($flat.Contains($norm) -or $norm.Contains(($flat -replace '(topdown|overhead)',''))) { $score += 25 }
-        if ($name -match '(?i)icon|logo|thumbnail') { $score -= 50 }
+        if ($name -match '(?i)top[ _-]*down|topdown|overhead|bird.?s.?eye|map') { $score += 100 }
+        if ($flat.Contains($norm)) { $score += 30 }
+        if ($name -match '(?i)icon|logo|thumbnail|badge') { $score -= 80 }
         [PSCustomObject]@{Title=$title; Score=$score}
     }
     $best = $ranked | Sort-Object Score -Descending | Select-Object -First 1
@@ -106,7 +130,13 @@ function Choose-TopDown([string]$MapName,[string[]]$Titles) {
     return $null
 }
 
-$towerCatalog = Read-Ini (Join-Path $InstallDir 'Resources\StrategyLab\Towers\catalog.ini')
+function Write-Status {
+    $text = "[Sync]`r`nTowers=$towerOK`r`nMaps=$mapOK`r`nMisses=$misses`r`nErrors=$errors`r`nCompleted=$(Get-Date -Format o)`r`n"
+    [IO.File]::WriteAllText($statusPath, $text, (New-Object Text.UTF8Encoding($false)))
+}
+
+$towerCatalogPath = Join-Path $InstallDir 'Resources\StrategyLab\Towers\catalog.ini'
+$towerCatalog = Read-Ini $towerCatalogPath
 $towerSections = @()
 if (![string]::IsNullOrWhiteSpace($TowerNames)) {
     $towerSections = @($TowerNames.Split('|') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -119,16 +149,24 @@ foreach ($section in $towerSections) {
     $page = if ($info -and $info.Contains('wikiPage')) { $info['wikiPage'] } else { $display }
     $key = Safe-Key $section
     try {
-        $url = Get-PageThumbnail $page 128
+        $url = Get-PageThumbnail $page 192
+        if (!$url) { $url = Get-PageThumbnail ($page + '/Gallery') 192 }
         if ($url) {
-            $target = Join-Path $towerDir ($key + '.png')
-            Download-Url $url $target
+            $target = Download-Image $url (Join-Path $towerDir $key)
+            $towerOK++
             Log "tower OK $display -> $target"
-        } else { Log "tower MISS $display (no page thumbnail)" }
-    } catch { Log "tower ERROR $display :: $($_.Exception.Message)" }
+        } else {
+            $misses++
+            Log "tower MISS $display (no page thumbnail)"
+        }
+    } catch {
+        $errors++
+        Log "tower ERROR $display :: $($_.Exception.Message)"
+    }
 }
 
-$mapCatalog = Read-Ini (Join-Path $InstallDir 'Resources\StrategyLab\Maps\catalog.ini')
+$mapCatalogPath = Join-Path $InstallDir 'Resources\StrategyLab\Maps\catalog.ini'
+$mapCatalog = Read-Ini $mapCatalogPath
 $mapSections = if (![string]::IsNullOrWhiteSpace($MapName)) { @($MapName.Trim()) } else { @($mapCatalog.Keys) }
 foreach ($section in $mapSections) {
     $info = if ($mapCatalog.Contains($section)) { $mapCatalog[$section] } else { $null }
@@ -136,24 +174,38 @@ foreach ($section in $mapSections) {
     $page = if ($info -and $info.Contains('wikiPage')) { $info['wikiPage'] } else { $display }
     $key = Safe-Key $section
     try {
-        $titles = @(Get-PageImages $page)
-        $file = Choose-TopDown $display $titles
-        if (!$file) {
-            $titles = @(Get-PageImages ('Map:' + $page))
+        $url = $null
+
+        ; Current Fandom maps expose their interactive-map artwork through Map:<name>.
+        ; Prefer that before scraping old gallery-style "Top Down" filenames.
+        $url = Get-PageThumbnail ('Map:' + $page) 1280
+
+        if (!$url) {
+            $titles = @(Get-PageImages $page)
             $file = Choose-TopDown $display $titles
+            if (!$file) {
+                $titles = @(Get-PageImages ('Map:' + $page))
+                $file = Choose-TopDown $display $titles
+            }
+            if ($file) { $url = Get-ImageThumbnail $file 1280 }
         }
-        if ($file) {
-            $url = Get-ImageThumbnail $file 1280
-            if ($url) {
-                $target = Join-Path $mapDir ($key + '.png')
-                Download-Url $url $target
-                Log "map OK $display [$file] -> $target"
-            } else { Log "map MISS $display (no image URL for $file)" }
-        } else { Log "map MISS $display (no Top Down image discovered)" }
-    } catch { Log "map ERROR $display :: $($_.Exception.Message)" }
+
+        if ($url) {
+            $target = Download-Image $url (Join-Path $mapDir $key)
+            $mapOK++
+            Log "map OK $display -> $target"
+        } else {
+            $misses++
+            Log "map MISS $display (no current interactive/top-down image discovered)"
+        }
+    } catch {
+        $errors++
+        Log "map ERROR $display :: $($_.Exception.Message)"
+    }
 }
 
+Write-Status
 $markerName = if (![string]::IsNullOrWhiteSpace($MapName)) { 'asset-sync-' + (Safe-Key $MapName) + '.done' } else { 'asset-sync-catalog.done' }
 [IO.File]::WriteAllText((Join-Path $root $markerName), (Get-Date -Format 'o'), (New-Object Text.UTF8Encoding($false)))
-Log 'asset sync complete'
+Log "asset sync complete towers=$towerOK maps=$mapOK misses=$misses errors=$errors"
 exit 0
