@@ -32,7 +32,7 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import re
+          import re, base64
 
           stable = Path('channel/stable/files')
           ahk = '\n'.join(p.read_text(encoding='utf-8-sig') for p in stable.glob('*.ahk'))
@@ -41,27 +41,47 @@ jobs:
           updater = (stable / 'submacros__lab_update.ps1').read_text(encoding='utf-8-sig')
           validation = (stable / 'lib__StrategyLab__LabStrategyValidation.ahk').read_text(encoding='utf-8-sig')
           core = (stable / 'lib__StrategyLab__StrategyEditorCore.ahk').read_text(encoding='utf-8-sig')
-          safety = (stable / 'lib__StrategyLab__LabSafety.ahk').read_text(encoding='utf-8-sig')
           remote = (stable / 'lib__StrategyLab__LabRemoteGate.ahk').read_text(encoding='utf-8-sig')
           footprints = (stable / 'lib__StrategyLab__LabSimpleFootprints.ahk').read_text(encoding='utf-8-sig')
+          placements = (stable / 'lib__StrategyLab__StrategyEditorPlacements.ahk').read_text(encoding='utf-8-sig')
+          reward_catalog = (stable / 'lib__StrategyLab__LabRewardCatalog.ahk').read_text(encoding='utf-8-sig')
+          reward_tracker = (stable / 'lib__StrategyLab__LabRewardTracker.ahk').read_text(encoding='utf-8-sig')
+          rewards_ini = (stable / 'Resources__StrategyLab__Rewards__catalog.ini').read_text(encoding='utf-8-sig')
           remote_settings = (stable / 'submacros__lab_remote_settings.ps1').read_text(encoding='utf-8-sig')
           preflight = (stable / 'submacros__lab_preflight.ps1').read_text(encoding='utf-8-sig')
 
-          assert '&this.' not in ahk, 'object properties cannot be AutoHotkey ByRef targets'
-          assert 'LabStrategyReadText' not in validation + core, 'legacy ByRef strategy decoder returned'
+          assert '&this.' not in ahk
+          assert 'LabStrategyReadText' not in validation + core
           assert 'LabStrategyReadFile' in validation and 'LabStrategyReadFile(path)' in core
-          assert 'FileRead(path, "RAW")' in validation, 'strategy decoder must inspect raw bytes first'
-          assert 'LabStrategyTrimTerminalNuls' in validation, 'terminal NUL compatibility guard missing'
+          assert 'FileRead(path, "RAW")' in validation
+          assert 'LabStrategyTrimTerminalNuls' in validation
           assert 'submacros/lab_syntax_probe.ps1|' in mapping
-          assert 'lib/StrategyLab/LabSimpleFootprints.ahk|' in mapping
-          assert 'LabSimpleFootprintsRemoveLegacyHalo' in footprints
-          assert 'DestroyWindow' in footprints and 'StrategyEditorFootprintDiameter' in footprints
+          assert 'Resources/StrategyLab/Towers/footprint-guide.png|' in mapping
+          assert 'lib/StrategyLab/LabRewardCatalog.ahk|' in mapping
+          assert 'lib/StrategyLab/LabRewardTracker.ahk|' in mapping
+          assert 'submacros/lab_reward_assets.ps1|' in mapping
+          assert 'Resources/StrategyLab/Rewards/catalog.ini|' in mapping
+          assert 'entry.ring.Value := LabSimpleFootprintGuidePath' in footprints
+          assert 'LabSimpleFootprintsUpgradeUniqueMarker' in footprints
+          assert 'DestroyWindow' in footprints
+          assert 'StrategyEditorFootprintDiameter' in placements
+          assert 'LabEditorRingMode := "selected"' in footprints
+          assert 'SetTimer(LabRewardMaybeSyncAssets, -6000)' in reward_catalog
+          assert 'special_drops":[]' in reward_tracker
+          for required in ['[Coin]','[Gem]','[Experience]','[Spin Ticket]','[Revive Ticket]','[Time Scale Ticket]']:
+              assert required in rewards_ini
+
+          guide_b64 = (stable / 'Resources__StrategyLab__Towers__footprint-guide.png.b64').read_text().strip()
+          guide = base64.b64decode(guide_b64, validate=True)
+          assert guide.startswith(b'\x89PNG\r\n\x1a\n')
+          assert len(guide) > 500
+
           assert 'lab_syntax_probe.ps1' in launcher
           assert 'lab_syntax_probe.ps1' in updater and 'Restore-AppliedFiles' in updater
           assert 'Discord Remote' in remote and 'LabRemoteWebhookBtn' in remote
           assert '[Drawing.Point]::new' in remote_settings and '[Drawing.Size]::new' in remote_settings
-          assert 'New-Object Drawing.Point(' not in remote_settings, 'ambiguous PowerShell Point constructor returned'
-          assert 'New-Object Drawing.Size(' not in remote_settings, 'ambiguous PowerShell Size constructor returned'
+          assert 'New-Object Drawing.Point(' not in remote_settings
+          assert 'New-Object Drawing.Size(' not in remote_settings
           assert '[switch]$SelfTest' in remote_settings
           assert '<StrategyLabRemoteBoundary>' in preflight
           assert 'LabRemoteConsumeBetweenMatches(&switched, &stratName)' in preflight
@@ -71,6 +91,7 @@ jobs:
         run: |
           $files = @(
             'channel/stable/files/submacros__lab_assets_v3.ps1',
+            'channel/stable/files/submacros__lab_reward_assets.ps1',
             'channel/stable/files/submacros__lab_update.ps1',
             'channel/stable/files/submacros__lab_preflight.ps1',
             'channel/stable/files/submacros__lab_syntax_probe.ps1',
@@ -117,7 +138,6 @@ jobs:
           $psi.CreateNoWindow = $true
           $psi.RedirectStandardOutput = $true
           $psi.RedirectStandardError = $true
-
           $proc = New-Object Diagnostics.Process
           $proc.StartInfo = $psi
           if (!$proc.Start()) { throw 'Could not launch AutoHotkey validator.' }
@@ -127,7 +147,6 @@ jobs:
             try { $proc.Kill() } catch {}
             throw 'AutoHotkey /Validate timed out after 30 seconds.'
           }
-
           $stdout = $stdoutTask.GetAwaiter().GetResult()
           $stderr = $stderrTask.GetAwaiter().GetResult()
           if ($stdout) { Write-Host $stdout }
@@ -148,7 +167,6 @@ jobs:
           $psi.CreateNoWindow = $true
           $psi.RedirectStandardOutput = $true
           $psi.RedirectStandardError = $true
-
           $proc = New-Object Diagnostics.Process
           $proc.StartInfo = $psi
           if (!$proc.Start()) { throw 'Could not launch AutoHotkey encoding test.' }
@@ -158,7 +176,6 @@ jobs:
             try { $proc.Kill() } catch {}
             throw 'AutoHotkey encoding test timed out after 30 seconds.'
           }
-
           $stdout = $stdoutTask.GetAwaiter().GetResult()
           $stderr = $stderrTask.GetAwaiter().GetResult()
           if ($stdout) { Write-Host $stdout }

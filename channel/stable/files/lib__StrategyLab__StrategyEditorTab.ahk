@@ -1,10 +1,12 @@
 #Requires AutoHotkey v2.0
 #Include "%A_ScriptDir%\lib\StrategyLab\MapLibrary.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\TowerCatalog.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\LabRewardCatalog.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyCalibration.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabStrategyValidation.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabSafety.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabTelemetry.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\LabRewardTracker.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabRemoteGate.ahk"
 
 ; Integrated Strategy Editor tab for Main_Lab.ahk.
