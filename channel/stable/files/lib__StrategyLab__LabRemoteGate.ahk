@@ -10,6 +10,8 @@ global LabRemoteConfig := LabRemoteRoot "\remote.ini"
 global LabRemoteWorkerPid := 0
 global LabRemoteLabCommandFile := LabRemoteRoot "\lab_remote_command.ini"
 
+global LabRemoteSettingsPid := 0
+
 LabRemoteEnsureRoot() {
     global LabRemoteRoot
     if !DirExist(LabRemoteRoot)
@@ -23,13 +25,27 @@ LabRemoteEnabled() {
 }
 
 LabRemoteLaunchSettings(*) {
+    global LabRemoteSettingsPid, LabRemoteRoot
+    LabRemoteEnsureRoot()
     script := A_ScriptDir "\submacros\lab_remote_settings.ps1"
+    logPath := LabRemoteRoot "\remote-settings.log"
+
     if !FileExist(script) {
-        try StrategyEditorSetStatus("Remote settings helper is missing.", true)
+        msg := "Remote settings helper is missing: " script
+        try StrategyEditorSetStatus(msg, true)
+        try MsgBox(msg "`n`nRun/update Strategy Lab 0.3.3+.", "Strategy Lab Remote", 0x10)
         return
     }
+
     cmd := 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' script '" -InstallDir "' A_ScriptDir '"'
-    try Run(cmd)
+    try {
+        Run(cmd, A_ScriptDir, , &LabRemoteSettingsPid)
+        try StrategyEditorSetStatus("Opening Discord Remote settings…")
+    } catch Error as err {
+        try FileAppend(FormatTime(, "yyyy-MM-dd HH:mm:ss") " ERROR launcher: " err.Message "`n", logPath, "UTF-8")
+        try StrategyEditorSetStatus("Could not open Remote settings: " err.Message, true)
+        try MsgBox("Could not open Discord Remote settings.`n`n" err.Message "`n`nLog: " logPath, "Strategy Lab Remote", 0x10)
+    }
 }
 
 LabRemoteEnsureWorker(*) {
@@ -48,7 +64,7 @@ LabRemoteEnsureWorker(*) {
     if !FileExist(worker)
         return
     cmd := 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' worker '" -InstallDir "' A_ScriptDir '"'
-    try Run(cmd, , "Hide", &LabRemoteWorkerPid)
+    try Run(cmd, A_ScriptDir, "Hide", &LabRemoteWorkerPid)
 }
 
 LabRemoteClearCommand(result := "", details := "") {
@@ -121,7 +137,9 @@ LabRemoteApplyStartupCommand(*) {
 
     LabRemoteResetSessionStats()
     LabRemoteClearCommand("start_accepted", strategy)
-    try SetTimer(StartStrategy, -150)
+    ; Upstream StartStrategy is StartStrategy(ctrl, *), so call it with the same
+    ; placeholder arguments used by the macro's F1 handler instead of a zero-arg timer.
+    try SetTimer((*) => StartStrategy(0, 0), -150)
     return true
 }
 
