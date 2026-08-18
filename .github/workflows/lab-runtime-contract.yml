@@ -8,6 +8,7 @@ on:
       - 'channel/stable/files.map'
       - 'tools/repair_strategy_lab.ps1'
       - 'tests/ahk_contract_harness.ahk'
+      - 'tests/strategy_encoding_test.ahk'
       - '.github/workflows/lab-runtime-contract.yml'
   pull_request:
     paths:
@@ -15,6 +16,7 @@ on:
       - 'channel/stable/files.map'
       - 'tools/repair_strategy_lab.ps1'
       - 'tests/ahk_contract_harness.ahk'
+      - 'tests/strategy_encoding_test.ahk'
       - '.github/workflows/lab-runtime-contract.yml'
 
 permissions:
@@ -45,6 +47,8 @@ jobs:
           assert '&this.' not in ahk, 'object properties cannot be AutoHotkey ByRef targets'
           assert 'LabStrategyReadText' not in validation + core, 'legacy ByRef strategy decoder returned'
           assert 'LabStrategyReadFile' in validation and 'LabStrategyReadFile(path)' in core
+          assert 'FileRead(path, "RAW")' in validation, 'strategy decoder must inspect raw bytes first'
+          assert 'LabStrategyTrimTerminalNuls' in validation, 'terminal NUL compatibility guard missing'
           assert not re.search(r'\bStopStrategy\s*\(\s*\)', ahk), 'zero-argument StopStrategy call found'
           assert not re.search(r'\bStartStrategy\s*\(\s*\)', ahk), 'zero-argument StartStrategy call found'
           assert 'StopStrategy(0, 0)' in safety
@@ -96,9 +100,6 @@ jobs:
       - name: Validate Strategy Lab against upstream function signatures
         shell: pwsh
         run: |
-          # /Validate is the AutoHotkey v2 load-only mode. It parses the harness and all
-          # Strategy Lab #Includes, validates known function arity, and exits without
-          # executing timers, GUI code, filesystem writes or automation.
           $script = (Resolve-Path 'tests/ahk_contract_harness.ahk').Path
           $psi = New-Object Diagnostics.ProcessStartInfo
           $psi.FileName = $env:AHK_EXE
@@ -125,4 +126,35 @@ jobs:
           if ($stderr) { Write-Host $stderr }
           if ($proc.ExitCode -ne 0 -or (($stdout + $stderr) -match '(?im)^Error:')) {
             throw "AutoHotkey /Validate failed with exit code $($proc.ExitCode)."
+          }
+
+      - name: Run strategy encoding compatibility fixtures
+        shell: pwsh
+        run: |
+          $script = (Resolve-Path 'tests/strategy_encoding_test.ahk').Path
+          $psi = New-Object Diagnostics.ProcessStartInfo
+          $psi.FileName = $env:AHK_EXE
+          $psi.Arguments = '/ErrorStdOut=UTF-8 "' + $script + '"'
+          $psi.WorkingDirectory = (Get-Location).Path
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+
+          $proc = New-Object Diagnostics.Process
+          $proc.StartInfo = $psi
+          if (!$proc.Start()) { throw 'Could not launch AutoHotkey encoding test.' }
+          $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+          $stderrTask = $proc.StandardError.ReadToEndAsync()
+          if (!$proc.WaitForExit(30000)) {
+            try { $proc.Kill() } catch {}
+            throw 'AutoHotkey encoding test timed out after 30 seconds.'
+          }
+
+          $stdout = $stdoutTask.GetAwaiter().GetResult()
+          $stderr = $stderrTask.GetAwaiter().GetResult()
+          if ($stdout) { Write-Host $stdout }
+          if ($stderr) { Write-Host $stderr }
+          if ($proc.ExitCode -ne 0 -or (($stdout + $stderr) -match '(?im)^Error:')) {
+            throw "AutoHotkey encoding compatibility test failed with exit code $($proc.ExitCode)."
           }
