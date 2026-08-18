@@ -113,7 +113,7 @@ StrategyEditorWorkspaceApply(rerender := false) {
     try LabEditorApplyBtn.Move(302, 552, 92, 30)
     try LabEditorSaveBtn.Move(402, 552, 92, 30)
     try LabEditorDirtyLabel.Move(680, 558, 300, 20)
-    try LabEditorOverwriteBtn.Move(680, 552, 300, 30)
+    try LabEditorOverwriteBtn.Move(680, 584, 300, 30)
     try LabEditorDirty.Move(20, 594, 640, 20)
     try LabEditorStatus.Move(20, 620, 960, 42)
 
