@@ -1,4 +1,4 @@
-# Strategy Lab stable delivery map 0.3.3 editor encoding + remote UI hotfix
+# Strategy Lab stable delivery map 0.3.4 ByRef parser hotfix
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 run_lab.bat|channel/stable/files/run_lab.bat|raw
