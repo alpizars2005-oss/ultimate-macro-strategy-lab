@@ -1,4 +1,4 @@
-# Strategy Lab stable delivery map 0.2.11
+# Strategy Lab stable delivery map 0.2.12
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 lib/StrategyLab/LabUpdater.ahk|channel/stable/files/lib__StrategyLab__LabUpdater.ahk|raw
@@ -11,8 +11,10 @@ lib/StrategyLab/StrategyEditorMaps.ahk|channel/stable/files/lib__StrategyLab__St
 lib/StrategyLab/StrategyEditorInteraction.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorInteraction.ahk|raw
 lib/StrategyLab/StrategyEditorWorkspace.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorWorkspace.ahk|raw
 lib/StrategyLab/StrategyEditorSave.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorSave.ahk|raw
+lib/StrategyLab/StrategyCalibration.ahk|channel/stable/files/lib__StrategyLab__StrategyCalibration.ahk|raw
 lib/StrategyLab/MapLibrary.ahk|channel/stable/files/lib__StrategyLab__MapLibrary.ahk|raw
 lib/StrategyLab/TowerCatalog.ahk|channel/stable/files/lib__StrategyLab__TowerCatalog.ahk|raw
+submacros/lab_calibration_worker.ahk|channel/stable/files/submacros__lab_calibration_worker.ahk|raw
 submacros/lab_assets.ps1|channel/stable/files/submacros__lab_assets_v3.ps1|raw
 Resources/StrategyLab/Maps/catalog.ini|channel/stable/files/Resources__StrategyLab__Maps__catalog.ini|raw
 Resources/StrategyLab/Towers/catalog.ini|channel/stable/files/Resources__StrategyLab__Towers__catalog.ini|raw
