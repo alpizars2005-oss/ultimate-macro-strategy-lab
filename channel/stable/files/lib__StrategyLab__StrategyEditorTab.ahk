@@ -21,7 +21,10 @@ global LabEditorExpanded := false
 global LabEditorCurrentMap := ""
 global LabEditorAssetSyncPid := 0
 global LabEditorAssetsRequested := false
-global LabEditorViewportPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport.png"
+; Double-buffered JPEG viewport frames reduce disk traffic and stale Picture-control flashes.
+global LabEditorViewportPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport-a.jpg"
+global LabEditorViewportAltPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport-b.jpg"
+global LabEditorViewportFrame := 0
 
 global LabEditorCanvasX := 20
 global LabEditorCanvasY := 205
