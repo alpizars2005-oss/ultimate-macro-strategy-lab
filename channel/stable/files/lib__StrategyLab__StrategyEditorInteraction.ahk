@@ -28,33 +28,38 @@ StrategyEditorIsActive() {
     return IsSet(LabEditorSnapshot) && IsObject(LabEditorSnapshot) && LabEditorSnapshot.Visible
 }
 
-; StrategyEditorRenderBackground swaps the Picture source after generating each
-; viewport JPEG. Native Static controls otherwise repaint the empty state between
-; those assignments, which is the flash visible while panning. WM_SETREDRAW lets us
-; finish the whole swap off-screen and invalidate exactly once at the end.
+; Map frames, circular placement markers and footprint-ring Pictures are sibling
+; controls on MainGui. Freezing only the map Picture allowed those siblings to repaint
+; while the map itself was intentionally suspended, which exposed the black parent
+; surface and produced the large torn/blank frames seen in live 0.2.15 testing.
+;
+; Freeze the whole Strategy Lab window for the tiny commit phase instead. The next
+; viewport is fully generated first, every child is repositioned while painting is
+; disabled, and Windows receives exactly one all-children redraw at the end. This is a
+; real atomic presentation boundary rather than several independently repainting HWNDs.
 StrategyEditorRenderBackgroundBuffered(repositionMarkers := true) {
-    global LabEditorSnapshot, LabEditorCanvasBg
-    suspended := []
+    global MainGui
 
-    for ctrl in [LabEditorSnapshot, LabEditorCanvasBg] {
-        if !IsObject(ctrl)
-            continue
-        hwnd := 0
-        try hwnd := ctrl.Hwnd
-        if !hwnd
-            continue
-        try {
-            DllCall("user32\SendMessageW", "Ptr", hwnd, "UInt", 0x000B, "Ptr", 0, "Ptr", 0, "Ptr") ; WM_SETREDRAW false
-            suspended.Push(hwnd)
-        }
-    }
+    if !IsSet(MainGui) || !IsObject(MainGui)
+        return StrategyEditorRenderBackground(repositionMarkers)
+
+    hwnd := 0
+    try hwnd := MainGui.Hwnd
+    if !hwnd
+        return StrategyEditorRenderBackground(repositionMarkers)
 
     result := false
-    try result := StrategyEditorRenderBackground(repositionMarkers)
-    finally {
-        for hwnd in suspended {
+    redrawSuspended := false
+    try {
+        DllCall("user32\SendMessageW", "Ptr", hwnd, "UInt", 0x000B, "Ptr", 0, "Ptr", 0, "Ptr") ; WM_SETREDRAW false
+        redrawSuspended := true
+        result := StrategyEditorRenderBackground(repositionMarkers)
+    } finally {
+        if redrawSuspended {
             try DllCall("user32\SendMessageW", "Ptr", hwnd, "UInt", 0x000B, "Ptr", 1, "Ptr", 0, "Ptr") ; WM_SETREDRAW true
-            try DllCall("user32\RedrawWindow", "Ptr", hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x181) ; invalidate + all children + update now
+            ; RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW. One complete paint keeps
+            ; the map, markers and placement rings on the exact same presented frame.
+            try DllCall("user32\RedrawWindow", "Ptr", hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x181)
         }
     }
     return result
@@ -116,9 +121,10 @@ StrategyEditorInteractiveMouseMove(wParam, lParam, msg, hwnd) {
     LabEditorViewport.CenterY := LabEditorPanStartCenterY - (dy / Max(1, LabEditorCanvasH)) * visibleH
     LabEditorViewport.ClampCenter()
 
-    ; Keep live navigation near 42 FPS. The important difference is that each frame
-    ; is now committed atomically instead of visibly clearing/reloading the Picture.
-    if (!LabEditorPanLastRender || A_TickCount - LabEditorPanLastRender >= 24) {
+    ; A complete atomic workspace repaint is a little more expensive than updating one
+    ; Picture HWND, so target ~33 FPS. In practice this feels smoother than presenting
+    ; partially torn 42 FPS frames and leaves more time for GDI+ JPEG generation.
+    if (!LabEditorPanLastRender || A_TickCount - LabEditorPanLastRender >= 30) {
         LabEditorPanLastRender := A_TickCount
         StrategyEditorRenderBackgroundBuffered()
     }
@@ -180,13 +186,13 @@ StrategyEditorInteractiveWheel(wParam, lParam, msg, hwnd) {
     LabEditorViewport.ClampCenter()
 
     ; Wheel events are discrete, but touchpads can burst. Coalesce impossible-to-see
-    ; intermediate states, then perform one buffered swap for the latest viewport.
+    ; intermediate states, then perform one atomic swap for the latest viewport.
     now := A_TickCount
-    if (!LabEditorWheelLastRender || now - LabEditorWheelLastRender >= 16) {
+    if (!LabEditorWheelLastRender || now - LabEditorWheelLastRender >= 24) {
         LabEditorWheelLastRender := now
         StrategyEditorRenderBackgroundBuffered()
     } else {
-        SetTimer(StrategyEditorWheelFlush, -16)
+        SetTimer(StrategyEditorWheelFlush, -24)
     }
     return 0
 }
