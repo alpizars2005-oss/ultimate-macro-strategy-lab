@@ -74,6 +74,7 @@ jobs:
               'submacros/lab_calibration_worker.ahk',
               'submacros/lab_assets.ps1',
               'submacros/lab_update.ps1',
+              'submacros/lab_fingerprint.ps1',
               'submacros/lab_discord_worker.ps1',
               'submacros/lab_remote_settings.ps1',
           }
@@ -107,7 +108,14 @@ jobs:
           telemetry = (root / source_for['lib/StrategyLab/LabTelemetry.ahk']).read_text(encoding='utf-8-sig')
           assert 'runs.jsonl' in telemetry
           assert 'heartbeat.ini' in telemetry
-          assert 'Get-FileHash' in telemetry
+          assert 'lab_fingerprint.ps1' in telemetry
+          assert '-Command' not in telemetry, 'telemetry must not embed nested PowerShell command text'
+          assert 'LabTelemetryQuoteArg' in telemetry
+
+          fingerprint = (root / source_for['submacros/lab_fingerprint.ps1']).read_text(encoding='utf-8-sig')
+          assert 'Get-FileHash' in fingerprint
+          assert '-LiteralPath $InputPath' in fingerprint
+          assert '[IO.File]::WriteAllText' in fingerprint
 
           remote = (root / source_for['lib/StrategyLab/LabRemoteGate.ahk']).read_text(encoding='utf-8-sig')
           assert 'LabRemoteConsumeBetweenMatches' in remote
@@ -194,6 +202,7 @@ jobs:
             'channel/stable/files/submacros__lab_assets_v3.ps1',
             'channel/stable/files/submacros__lab_update.ps1',
             'channel/stable/files/submacros__lab_preflight.ps1',
+            'channel/stable/files/submacros__lab_fingerprint.ps1',
             'channel/stable/files/submacros__lab_discord_worker.ps1',
             'channel/stable/files/submacros__lab_remote_settings.ps1'
           )
