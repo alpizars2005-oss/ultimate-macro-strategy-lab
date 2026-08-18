@@ -8,6 +8,7 @@
 #Include "%A_ScriptDir%\lib\StrategyLab\LabTelemetry.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabRewardTracker.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabRemoteGate.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\LabStatsTab.ahk"
 
 ; Integrated Strategy Editor tab for Main_Lab.ahk.
 
