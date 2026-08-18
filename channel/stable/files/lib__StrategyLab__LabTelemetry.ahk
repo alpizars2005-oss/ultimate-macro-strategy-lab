@@ -27,24 +27,40 @@ LabTelemetryEscape(value) {
     return value
 }
 
+LabTelemetryQuoteArg(value) {
+    ; Windows filenames cannot contain a literal double quote, so normal quoted
+    ; arguments are enough here. Keep command construction simple and parse-safe.
+    return '"' value '"'
+}
+
 LabTelemetryStrategyFingerprint(path) {
     if (path = "" || !FileExist(path))
         return ""
 
     root := LabTelemetryEnsureDir()
     out := root "\fingerprint.tmp"
+    helper := A_ScriptDir "\submacros\lab_fingerprint.ps1"
+    if !FileExist(helper)
+        return ""
+
     if FileExist(out)
         try FileDelete(out)
-    escaped := StrReplace(path, "'", "''")
-    cmd := 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "'
-        . '$h=(Get-FileHash -LiteralPath ''' escaped ''' -Algorithm SHA256).Hash; '
-        . '[IO.File]::WriteAllText(''' StrReplace(out, "'", "''") ''',$h,(New-Object Text.UTF8Encoding($false)))"'
+
+    cmd := "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "
+        . LabTelemetryQuoteArg(helper)
+        . " -InputPath " LabTelemetryQuoteArg(path)
+        . " -OutputPath " LabTelemetryQuoteArg(out)
+
     try RunWait(cmd, , "Hide")
+    catch
+        return ""
+
     if !FileExist(out)
         return ""
+
     hash := Trim(FileRead(out, "UTF-8"))
     try FileDelete(out)
-    return hash
+    return RegExMatch(hash, "i)^[0-9a-f]{64}$") ? StrUpper(hash) : ""
 }
 
 LabTelemetryAppendResult(result, wins, losses, strategyPath, coins, gems, exp, runCount) {
