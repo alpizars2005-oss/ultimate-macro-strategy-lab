@@ -150,7 +150,9 @@ StrategyEditorRenderBackground(repositionMarkers := true) {
     LabEditorViewportFrame += 1
 
     if LabMapRenderViewport(LabEditorSourceImage, LabEditorViewport, renderPath, LabEditorCanvasW, LabEditorCanvasH) {
-        LabEditorSnapshot.Value := ""
+        ; Do not clear the Picture before assigning the alternate frame. The old frame
+        ; remains visible until the new JPEG is ready, eliminating the one-frame black
+        ; flash observed in the live Windows recording during pan/zoom.
         LabEditorSnapshot.Value := renderPath
         LabEditorSnapshot.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
         LabEditorSnapshot.Visible := true
@@ -278,9 +280,12 @@ StrategyEditorShowTower(placement) {
     if (towerName = "")
         towerName := "Slot " placement.slot
     portrait := LabTowerPortraitPath(towerName)
-    LabEditorTowerPortrait.Value := ""
+    ; Like the map viewport, keep the previous picture alive until the replacement
+    ; path is ready. This avoids a small white/empty flash when stepping through rows.
     if (portrait != "")
         LabEditorTowerPortrait.Value := portrait
+    else
+        LabEditorTowerPortrait.Value := ""
     LabEditorTowerName.Text := LabTowerPlacementDisplay(LabEditorDoc, placement)
     LabEditorTowerMeta.Text := LabTowerPlacementMeta(LabEditorDoc, placement) "`nX " placement.x "  •  Y " placement.y
 }
