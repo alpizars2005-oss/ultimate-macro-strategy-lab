@@ -72,7 +72,34 @@ function Install-RemoteBoundary([string]$Text,[string]$Main,[ref]$Changed) {
     Backup-Main $Main 'remote-boundary install' | Out-Null
     $Text = $Text.Substring(0, $m.Index) + $hook + $Text.Substring($m.Index + $m.Length)
     $Changed.Value = $true
-    Log 'INSTALLED safe remote between-match boundary in RunStrategy().' 
+    Log 'INSTALLED safe remote between-match boundary in RunStrategy().'
+    return $Text
+}
+
+function Install-WebhookRemoteShortcut([string]$Text,[string]$Main,[ref]$Changed) {
+    $event = 'Tab4_Title.OnEvent("Click", LabRemoteLaunchSettings)'
+    if ($Text.Contains($event)) {
+        Log 'OK Discord Webhook title remote shortcut already installed.'
+        return $Text
+    }
+
+    # The upstream Webhook title is an ordinary Text control. Make that existing
+    # "Discord Webhook" heading the discoverable entry-point Dark-style: clicking it
+    # opens Strategy Lab's bot settings, while the original webhook controls remain.
+    $pattern = '(?m)^(?<indent>[ \t]*)global[ \t]+Tab4_Title[ \t]*:=[^\r\n]*"Discord Webhook"[^\r\n]*\r?$'
+    $matches = [regex]::Matches($Text, $pattern)
+    if ($matches.Count -ne 1) {
+        Log ("WARN Webhook remote shortcut not installed: expected one Discord Webhook title, found {0}." -f $matches.Count)
+        return $Text
+    }
+
+    $m = $matches[0]
+    $indent = $m.Groups['indent'].Value
+    $replacement = $m.Value.TrimEnd("`r", "`n") + "`r`n" + $indent + $event
+    Backup-Main $Main 'Webhook remote shortcut install' | Out-Null
+    $Text = $Text.Substring(0, $m.Index) + $replacement + $Text.Substring($m.Index + $m.Length)
+    $Changed.Value = $true
+    Log 'INSTALLED Discord Webhook title -> Strategy Lab Remote settings shortcut.'
     return $Text
 }
 
@@ -83,6 +110,7 @@ function Verify-LabModules([string]$InstallRoot) {
         'lib\StrategyLab\LabStrategyValidation.ahk',
         'lib\StrategyLab\LabTelemetry.ahk',
         'lib\StrategyLab\LabRemoteGate.ahk',
+        'submacros\lab_fingerprint.ps1',
         'submacros\lab_discord_worker.ps1',
         'submacros\lab_remote_settings.ps1'
     )
@@ -116,13 +144,13 @@ try {
     $changed = $false
     $text = Repair-StrayClear $text $main ([ref]$changed)
 
-    # Install the remote hook only when the bridge module is actually present. This
-    # keeps preflight backward compatible while a machine is still finishing 0.3 update.
+    # Install remote integration only when the bridge module is actually present.
     $remoteGate = Join-Path $installRoot 'lib\StrategyLab\LabRemoteGate.ahk'
     if (Test-Path -LiteralPath $remoteGate -PathType Leaf) {
         $text = Install-RemoteBoundary $text $main ([ref]$changed)
+        $text = Install-WebhookRemoteShortcut $text $main ([ref]$changed)
     } else {
-        Log 'INFO remote bridge not installed yet; skipping RunStrategy hook.'
+        Log 'INFO remote bridge not installed yet; skipping remote Main_Lab hooks.'
     }
 
     if ($changed) { Write-Utf8NoBom $main $text }
