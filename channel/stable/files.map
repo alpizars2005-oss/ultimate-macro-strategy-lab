@@ -1,4 +1,4 @@
-# Strategy Lab stable delivery map 0.3.7 remote + footprint reliability pass
+# Strategy Lab stable delivery map 0.3.8 editor marker + reward tracker pass
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 run_lab.bat|channel/stable/files/run_lab.bat|raw
@@ -18,16 +18,21 @@ lib/StrategyLab/StrategyEditorSave.ahk|channel/stable/files/lib__StrategyLab__St
 lib/StrategyLab/StrategyCalibration.ahk|channel/stable/files/lib__StrategyLab__StrategyCalibration.ahk|raw
 lib/StrategyLab/MapLibrary.ahk|channel/stable/files/lib__StrategyLab__MapLibrary.ahk|raw
 lib/StrategyLab/TowerCatalog.ahk|channel/stable/files/lib__StrategyLab__TowerCatalog.ahk|raw
+lib/StrategyLab/LabRewardCatalog.ahk|channel/stable/files/lib__StrategyLab__LabRewardCatalog.ahk|raw
+lib/StrategyLab/LabRewardTracker.ahk|channel/stable/files/lib__StrategyLab__LabRewardTracker.ahk|raw
 lib/StrategyLab/LabStrategyValidation.ahk|channel/stable/files/lib__StrategyLab__LabStrategyValidation.ahk|raw
 lib/StrategyLab/LabSafety.ahk|channel/stable/files/lib__StrategyLab__LabSafety.ahk|raw
 lib/StrategyLab/LabTelemetry.ahk|channel/stable/files/lib__StrategyLab__LabTelemetry.ahk|raw
 lib/StrategyLab/LabRemoteGate.ahk|channel/stable/files/lib__StrategyLab__LabRemoteGate.ahk|raw
 submacros/lab_calibration_worker.ahk|channel/stable/files/submacros__lab_calibration_worker.ahk|raw
 submacros/lab_assets.ps1|channel/stable/files/submacros__lab_assets_v3.ps1|raw
+submacros/lab_reward_assets.ps1|channel/stable/files/submacros__lab_reward_assets.ps1|raw
 submacros/lab_fingerprint.ps1|channel/stable/files/submacros__lab_fingerprint.ps1|raw
 submacros/lab_discord_worker.ps1|channel/stable/files/submacros__lab_discord_worker.ps1|raw
 submacros/lab_remote_settings.ps1|channel/stable/files/submacros__lab_remote_settings.ps1|raw
 Resources/StrategyLab/Maps/catalog.ini|channel/stable/files/Resources__StrategyLab__Maps__catalog.ini|raw
 Resources/StrategyLab/Towers/catalog.ini|channel/stable/files/Resources__StrategyLab__Towers__catalog.ini|raw
 Resources/StrategyLab/Towers/placeholder.png|channel/stable/files/Resources__StrategyLab__Towers__placeholder.png.b64|base64
+Resources/StrategyLab/Towers/footprint-guide.png|channel/stable/files/Resources__StrategyLab__Towers__footprint-guide.png.b64|base64
+Resources/StrategyLab/Rewards/catalog.ini|channel/stable/files/Resources__StrategyLab__Rewards__catalog.ini|raw
 Resources/StrategyLab/ATTRIBUTION.md|channel/stable/files/Resources__StrategyLab__ATTRIBUTION.md|raw
