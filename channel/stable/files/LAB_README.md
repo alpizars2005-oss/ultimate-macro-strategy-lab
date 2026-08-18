@@ -1,59 +1,69 @@
-# Ultimate Macro Strategy Lab 0.2.0
+# Ultimate Macro Strategy Lab 0.2.4
 
 Private experimental build based on Darksen's official Ultimate Macro 1.3.3.
 
-## Strategy Editor 0.2
+## Strategy Editor 0.2.4
 
-The Editor now understands the strategy's `map=` and `requiredTowers=` metadata.
+This build is a visual-polish and asset-reliability pass over the 0.2 editor.
+
+### Polished tactical editor
+
+- Cleaner two-row toolbar with map, layer, pan, zoom and asset controls grouped together.
+- Larger tactical canvas and a dedicated dark details panel.
+- Native ListView rows now use readable dark-background/light-text styling instead of white-on-white rows.
+- The first placement is selected automatically when a strategy loads, so the unit portrait/name/coordinates are visible immediately.
+- Selected placement markers grow slightly for a clearer editing focus.
+- Single-placement towers use a clean initial marker instead of an unnecessary `#1`; multi-placement towers use their occurrence number.
+- Empty map state now explains whether to use **Sync Assets** or **Capture** instead of showing a blank rectangle.
 
 ### Map Library
 
-- A clean **Capture** is stored automatically per map under `%APPDATA%\Ultimate_Macro\StrategyEditor\MapLibrary\camera`.
-- The next time a strategy for that map is opened, the exact macro-camera image is loaded automatically.
-- The Lab can also fetch lightweight **Top Down reference images** from the Tower Defense Simulator Wiki. These are stored under `%APPDATA%\Ultimate_Macro\StrategyEditor\MapLibrary\reference`.
-- Wiki Top Down images are deliberately **reference-only**: perspective/elevation means they are not guaranteed to map directly to recorded screen coordinates. Dragging is locked until a camera capture exists. This prevents silent strategy corruption.
-- `Capture` hides Strategy Lab before taking the Roblox image and restores it in `finally`.
-
-### Precision controls
-
-- `-`, `+`, `100%`, and `Fit` zoom controls.
-- Mouse wheel zoom while the cursor is over the map.
-- Arrow buttons pan the zoomed viewport.
-- `Expand / Compact` toggles a larger 640x345 editing surface without making the entire macro fullscreen.
-- Marker coordinate conversion follows the current zoom/pan viewport, so drag precision improves as you zoom in.
+- **Capture** hides Strategy Lab before taking the Roblox screenshot and restores it in `finally`.
+- Exact macro-camera captures are stored per map under `%APPDATA%\Ultimate_Macro\StrategyEditor\MapLibrary\camera` and remain authoritative for coordinate dragging.
+- Wiki/Interactive-Map images are cached under `%APPDATA%\Ultimate_Macro\StrategyEditor\MapLibrary\reference` and remain reference-only until exact calibration exists.
+- Asset sync now tries the Wiki's current `Map:<name>` Interactive Map artwork before falling back to legacy Top Down filename discovery. This improves support for current maps such as Dead Ahead.
+- Missing assets are retried on later strategy loads instead of a stale `.done` marker permanently suppressing retries.
 
 ### Tower Library
 
 The Lab reads `requiredTowers` and associates placements with a tower catalog.
 
-- Default/base tower portraits are cached from the TDS Wiki on demand; skins are not selected.
-- The selected placement shows its portrait, display name, and placement-limit metadata.
+- Base/default tower portraits are cached on demand from the TDS Wiki.
+- The selected placement shows portrait, display name, slot, X/Y and placement-limit metadata.
 - Towers with a placement limit of exactly 1 are shown without `#1`.
 - Multi-placement towers are displayed as `Tower #1`, `Tower #2`, etc.
-- Placement limits live in `Resources\StrategyLab\Towers\catalog.ini` so they can be corrected by an update without changing editor code.
+- Placement limits live in `Resources\StrategyLab\Towers\catalog.ini` so they can be corrected independently of editor code.
+- Catalog/placeholder paths are resolved from `A_ScriptDir`, not the current working directory, so launching the Lab from a different directory no longer breaks asset lookup.
 
-The 0.2 seed catalog covers every tower used by the official 1.3.3 strategies bundled with this Lab. Unknown limits are intentionally left as `0` rather than guessed.
+### Asset sync status
 
-### Asset sync
+`Sync Assets` now writes a small status file and reports real results, for example how many tower portraits and map references were downloaded, plus misses/errors. The Editor shows that state in the header instead of always saying only that sync finished.
 
-`Sync Assets` runs in the background. It uses the public TDS Fandom/MediaWiki API and stores only the current strategy's map reference and tower portraits. This keeps the Lab small instead of downloading an entire 4K map/tower library.
+The Lab remains usable when the Wiki is unavailable: placeholders, manual snapshots and exact Roblox Capture continue to work.
 
-The first time the Editor opens a strategy for a map, asset sync is attempted automatically. It is safe to keep using the editor if the Wiki is unavailable; Capture and placeholder portraits continue to work.
+### Precision controls
+
+- `−`, `+`, `100%`, and `Fit` zoom controls.
+- Mouse-wheel zoom while the cursor is over the map.
+- Arrow buttons pan the zoomed viewport.
+- `Expand / Compact` provides a larger tactical surface without forcing the entire macro fullscreen.
+- Marker coordinate conversion follows the current zoom/pan viewport.
 
 ## Saving
 
-For testing, prefer **Save Copy** first. `Overwrite + automatic backup` still creates a timestamped backup before replacing a strategy.
+For live testing, prefer **Save Copy** first. `Overwrite + automatic backup` still creates a timestamped backup before replacing a strategy.
 
 The editor only rewrites the first two arguments of the selected `SpawnTower(x, y, ...)` line. `UpgradeTower`, `SellTower`, `ChangeTargets`, `ToggleAutoskip`, abilities, waits, and unknown future actions are preserved.
 
 ## Reward Tracker
 
-The 0.1 reward tracker remains intact: result-boundary Coins/Gems/XP, item reward catalog, per-run/session/lifetime ledgers, and evidence capture. It does not run inside timing-sensitive `PlayStrategy()`.
+The existing reward tracker remains isolated at the result/watchdog boundary: Coins/Gems/XP, item reward catalog, per-run/session/lifetime ledgers, and evidence capture. It does not poll inside timing-sensitive `PlayStrategy()` execution.
 
-## Auto updater
+## Auto updater / build safety
 
-0.1.1 and later can receive this build through the private `stable` channel. Updates are SHA-256 verified and backed up, and the updater rejects `Resources\Strats` as a target.
+- Private updates remain SHA-256 verified and automatically backed up.
+- `Resources\Strats` remains rejected as an updater target.
+- Stable update hashes are now generated automatically in GitHub from `channel/stable/files.map`, removing manual manifest drift.
+- CI sanity checks reject the AHK v2 mistakes that previously caused startup failures (`A_LocalAppData` and using reserved `local` as a variable), validate update-source mappings, run Python tests, and parse the PowerShell helpers.
 
-## Test status
-
-Static/integration suite for 0.2.0: **13 passed**. A Windows AutoHotkey/Roblox run is still the acceptance test for GUI interaction and live Wiki asset retrieval.
+A real Windows AutoHotkey/Roblox run is still the final acceptance test for GUI interaction and live Wiki asset retrieval.
