@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$ua = 'UltimateMacroStrategyLab/0.2.6 (private development; TDS Wiki asset cache)'
+$ua = 'UltimateMacroStrategyLab/0.2.7 (private development; TDS Wiki asset cache)'
 $root = Join-Path $env:APPDATA 'Ultimate_Macro\StrategyEditor'
 $towerDir = Join-Path $root 'TowerLibrary'
 $mapDir = Join-Path $root 'MapLibrary\reference'
@@ -17,6 +17,8 @@ $towerOK = 0
 $mapOK = 0
 $misses = 0
 $errors = 0
+$apiFallbacks = 0
+$downloadFallbacks = 0
 
 function Log([string]$Text) {
     Add-Content -LiteralPath $logPath -Encoding UTF8 -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $Text)
@@ -45,28 +47,39 @@ function Read-Ini([string]$Path) {
     return $result
 }
 
-function Invoke-Wiki([hashtable]$Params) {
+function Build-WikiUri([hashtable]$Params) {
     $query = @{}
     foreach ($k in $Params.Keys) { $query[$k] = $Params[$k] }
     $query['format'] = 'json'
     $pairs = foreach ($k in $query.Keys) {
         [Uri]::EscapeDataString([string]$k) + '=' + [Uri]::EscapeDataString([string]$query[$k])
     }
-    $uri = 'https://tds.fandom.com/api.php?' + ($pairs -join '&')
+    return 'https://tds.fandom.com/api.php?' + ($pairs -join '&')
+}
 
+function Invoke-CurlText([string]$Url) {
+    $tmp = Join-Path $env:TEMP ('ultimate-macro-wiki-' + [Guid]::NewGuid().ToString('N') + '.json')
     try {
-        return Invoke-RestMethod -UseBasicParsing -Uri $uri -Headers @{ 'User-Agent'=$ua; 'Accept'='application/json' } -TimeoutSec 25
-    } catch {
-        $primary = $_.Exception.Message
-        Log "wiki REST fallback :: $primary"
-        $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
-        if (!$curl) { throw "TDS Wiki request failed and curl.exe is unavailable: $primary" }
+        & curl.exe -L --fail --silent --show-error --connect-timeout 15 --max-time 45 `
+            -A $ua -H 'Accept: application/json' -o $tmp $Url
+        if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $tmp)) {
+            throw "curl.exe failed with exit code $LASTEXITCODE"
+        }
+        return [IO.File]::ReadAllText($tmp)
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
 
-        $raw = & curl.exe -L --fail --silent --show-error --max-time 25 -A $ua -H 'Accept: application/json' $uri 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "TDS Wiki request failed via PowerShell and curl.exe: $($raw -join ' ')" }
-        $text = ($raw -join "`n")
-        if ([string]::IsNullOrWhiteSpace($text)) { throw 'TDS Wiki returned an empty response.' }
-        return $text | ConvertFrom-Json
+function Invoke-Wiki([hashtable]$Params) {
+    $uri = Build-WikiUri $Params
+    try {
+        return Invoke-RestMethod -Uri $uri -Headers @{ 'User-Agent'=$ua; 'Accept'='application/json' } -TimeoutSec 25
+    } catch {
+        $script:apiFallbacks++
+        Log "api REST fallback -> curl :: $($_.Exception.Message)"
+        $text = Invoke-CurlText $uri
+        return ($text | ConvertFrom-Json)
     }
 }
 
@@ -76,69 +89,62 @@ function Remove-OldImageVariants([string]$BasePath) {
     }
 }
 
-function Get-ImageExtension([string]$Path) {
-    if (!(Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+function Get-ImageKind([string]$Path) {
+    if (!(Test-Path -LiteralPath $Path)) { return $null }
     $bytes = [IO.File]::ReadAllBytes($Path)
-    if ($bytes.Length -lt 12) { return $null }
-    if ($bytes[0] -eq 0x89 -and $bytes[1] -eq 0x50 -and $bytes[2] -eq 0x4E -and $bytes[3] -eq 0x47) { return '.png' }
-    if ($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xD8 -and $bytes[2] -eq 0xFF) { return '.jpg' }
-    if ($bytes[0] -eq 0x42 -and $bytes[1] -eq 0x4D) { return '.bmp' }
-    if ([Text.Encoding]::ASCII.GetString($bytes,0,4) -eq 'RIFF' -and [Text.Encoding]::ASCII.GetString($bytes,8,4) -eq 'WEBP') { return '.webp' }
+    if ($bytes.Length -ge 8 -and
+        $bytes[0] -eq 0x89 -and $bytes[1] -eq 0x50 -and $bytes[2] -eq 0x4E -and $bytes[3] -eq 0x47 -and
+        $bytes[4] -eq 0x0D -and $bytes[5] -eq 0x0A -and $bytes[6] -eq 0x1A -and $bytes[7] -eq 0x0A) { return 'png' }
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xD8 -and $bytes[2] -eq 0xFF) { return 'jpg' }
+    if ($bytes.Length -ge 2 -and $bytes[0] -eq 0x42 -and $bytes[1] -eq 0x4D) { return 'bmp' }
+    if ($bytes.Length -ge 12 -and
+        $bytes[0] -eq 0x52 -and $bytes[1] -eq 0x49 -and $bytes[2] -eq 0x46 -and $bytes[3] -eq 0x46 -and
+        $bytes[8] -eq 0x57 -and $bytes[9] -eq 0x45 -and $bytes[10] -eq 0x42 -and $bytes[11] -eq 0x50) { return 'webp' }
     return $null
-}
-
-function Remove-InvalidCachedVariants([string]$BasePath) {
-    foreach ($ext in @('.png','.jpg','.jpeg','.bmp','.webp')) {
-        $path = $BasePath + $ext
-        if (!(Test-Path -LiteralPath $path -PathType Leaf)) { continue }
-        $actual = Get-ImageExtension $path
-        if (!$actual -or $actual -eq '.webp') {
-            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-            Log "cache PURGE $path (invalid/unsupported image bytes)"
-        }
-    }
 }
 
 function Download-Image([string]$Url,[string]$BasePath) {
     $tmp = $BasePath + '.download'
     Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-
     try {
-        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $tmp -Headers @{ 'User-Agent'=$ua; 'Accept'='image/png,image/jpeg,image/*;q=0.8' } -TimeoutSec 45 | Out-Null
-    } catch {
-        $primary = $_.Exception.Message
-        Log "image REST fallback :: $primary"
-        $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
-        if (!$curl) { throw "Image download failed and curl.exe is unavailable: $primary" }
-        $raw = & curl.exe -L --fail --silent --show-error --max-time 45 -A $ua -H 'Accept: image/png,image/jpeg,image/*;q=0.8' -o $tmp $Url 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "Image download failed via PowerShell and curl.exe: $($raw -join ' ')" }
-    }
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $tmp `
+                -Headers @{ 'User-Agent'=$ua; 'Accept'='image/png,image/jpeg,image/bmp,image/*;q=0.5' } -TimeoutSec 45 | Out-Null
+        } catch {
+            $script:downloadFallbacks++
+            Log "image IWR fallback -> curl :: $($_.Exception.Message)"
+            & curl.exe -L --fail --silent --show-error --connect-timeout 15 --max-time 60 `
+                -A $ua -H 'Accept: image/png,image/jpeg,image/bmp,image/*;q=0.5' -o $tmp $Url
+            if ($LASTEXITCODE -ne 0) { throw "curl.exe image download failed with exit code $LASTEXITCODE" }
+        }
 
-    if (!(Test-Path -LiteralPath $tmp) -or (Get-Item -LiteralPath $tmp).Length -lt 200) {
-        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-        throw "Downloaded asset is empty: $Url"
-    }
+        if (!(Test-Path -LiteralPath $tmp) -or (Get-Item -LiteralPath $tmp).Length -lt 200) {
+            throw "Downloaded asset is empty: $Url"
+        }
 
-    $ext = Get-ImageExtension $tmp
-    if (!$ext) {
-        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-        throw 'Downloaded response is not a supported image (possibly an HTML/error response).'
-    }
-    if ($ext -eq '.webp') {
-        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-        throw 'Image source returned WebP; Windows GDI+ cannot render it safely in this Lab build.'
-    }
+        $kind = Get-ImageKind $tmp
+        if (!$kind) { throw 'Downloaded response is not a supported image (possible HTML/error response).' }
+        if ($kind -eq 'webp') { throw 'Downloaded image is WebP; original PNG/JPEG source is required for GDI+.' }
 
-    Remove-OldImageVariants $BasePath
-    $target = $BasePath + $ext
-    Move-Item -LiteralPath $tmp -Destination $target -Force
-    return $target
+        Remove-OldImageVariants $BasePath
+        $target = $BasePath + '.' + $kind
+        Move-Item -LiteralPath $tmp -Destination $target -Force
+        return $target
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
 }
 
-function Get-PageThumbnail([string]$Page,[int]$Width=128) {
-    $json = Invoke-Wiki @{ action='query'; titles=$Page; prop='pageimages'; piprop='thumbnail'; pithumbsize=$Width }
+function Normalize-FileTitle([string]$Title) {
+    if ([string]::IsNullOrWhiteSpace($Title)) { return $null }
+    if ($Title.StartsWith('File:')) { return $Title }
+    return 'File:' + $Title
+}
+
+function Get-PagePrimaryFile([string]$Page) {
+    $json = Invoke-Wiki @{ action='query'; titles=$Page; prop='pageimages'; piprop='name' }
     foreach ($pageObj in $json.query.pages.PSObject.Properties.Value) {
-        if ($pageObj.thumbnail -and $pageObj.thumbnail.source) { return [string]$pageObj.thumbnail.source }
+        if ($pageObj.pageimage) { return Normalize-FileTitle ([string]$pageObj.pageimage) }
     }
     return $null
 }
@@ -152,14 +158,13 @@ function Get-PageImages([string]$Page) {
     return $titles
 }
 
-function Get-ImageThumbnail([string]$FileTitle,[int]$Width=1280) {
-    $json = Invoke-Wiki @{ action='query'; titles=$FileTitle; prop='imageinfo'; iiprop='url'; iiurlwidth=$Width }
+function Get-ImageOriginalUrl([string]$FileTitle) {
+    $fileTitle = Normalize-FileTitle $FileTitle
+    if (!$fileTitle) { return $null }
+    $json = Invoke-Wiki @{ action='query'; titles=$fileTitle; prop='imageinfo'; iiprop='url' }
     foreach ($pageObj in $json.query.pages.PSObject.Properties.Value) {
         $ii = @($pageObj.imageinfo)
-        if ($ii.Count -gt 0) {
-            if ($ii[0].thumburl) { return [string]$ii[0].thumburl }
-            if ($ii[0].url) { return [string]$ii[0].url }
-        }
+        if ($ii.Count -gt 0 -and $ii[0].url) { return [string]$ii[0].url }
     }
     return $null
 }
@@ -197,11 +202,13 @@ function Choose-TopDown([string]$MapName,[string[]]$Titles) {
     return $null
 }
 
-function Write-Status {
-    $text = "[Sync]`r`nTowers=$towerOK`r`nMaps=$mapOK`r`nMisses=$misses`r`nErrors=$errors`r`nCompleted=$(Get-Date -Format o)`r`n"
+function Write-Status([string]$LastError='') {
+    $safeError = ($LastError -replace '[\r\n]+',' ') -replace '=','-'
+    $text = "[Sync]`r`nTowers=$towerOK`r`nMaps=$mapOK`r`nMisses=$misses`r`nErrors=$errors`r`nApiFallbacks=$apiFallbacks`r`nDownloadFallbacks=$downloadFallbacks`r`nLastError=$safeError`r`nCompleted=$(Get-Date -Format o)`r`n"
     [IO.File]::WriteAllText($statusPath, $text, (New-Object Text.UTF8Encoding($false)))
 }
 
+$lastError = ''
 $towerCatalogPath = Join-Path $InstallDir 'Resources\StrategyLab\Towers\catalog.ini'
 $towerCatalog = Read-Ini $towerCatalogPath
 $towerSections = @()
@@ -215,21 +222,25 @@ foreach ($section in $towerSections) {
     $display = if ($info -and $info.Contains('display')) { $info['display'] } else { $section }
     $page = if ($info -and $info.Contains('wikiPage')) { $info['wikiPage'] } else { $display }
     $key = Safe-Key $section
-    $base = Join-Path $towerDir $key
-    Remove-InvalidCachedVariants $base
     try {
         $url = $null
         $galleryTitles = @(Get-PageImages ($page + '/Gallery'))
         $defaultFile = Choose-DefaultTowerImage $display $galleryTitles
         if ($defaultFile) {
-            $url = Get-ImageThumbnail $defaultFile 192
+            $url = Get-ImageOriginalUrl $defaultFile
             if ($url) { Log "tower DEFAULT $display [$defaultFile]" }
         }
-        if (!$url) { $url = Get-PageThumbnail $page 192 }
-        if (!$url) { $url = Get-PageThumbnail ($page + '/Gallery') 192 }
+        if (!$url) {
+            $primary = Get-PagePrimaryFile $page
+            if ($primary) { $url = Get-ImageOriginalUrl $primary }
+        }
+        if (!$url) {
+            $primary = Get-PagePrimaryFile ($page + '/Gallery')
+            if ($primary) { $url = Get-ImageOriginalUrl $primary }
+        }
 
         if ($url) {
-            $target = Download-Image $url $base
+            $target = Download-Image $url (Join-Path $towerDir $key)
             $towerOK++
             Log "tower OK $display -> $target"
         } else {
@@ -238,6 +249,7 @@ foreach ($section in $towerSections) {
         }
     } catch {
         $errors++
+        $lastError = "tower $display :: $($_.Exception.Message)"
         Log "tower ERROR $display :: $($_.Exception.Message)"
     }
 }
@@ -250,11 +262,10 @@ foreach ($section in $mapSections) {
     $display = if ($info -and $info.Contains('display')) { $info['display'] } else { $section }
     $page = if ($info -and $info.Contains('wikiPage')) { $info['wikiPage'] } else { $display }
     $key = Safe-Key $section
-    $base = Join-Path $mapDir $key
-    Remove-InvalidCachedVariants $base
     try {
         $url = $null
-        $url = Get-PageThumbnail ('Map:' + $page) 1280
+        $primary = Get-PagePrimaryFile ('Map:' + $page)
+        if ($primary) { $url = Get-ImageOriginalUrl $primary }
 
         if (!$url) {
             $titles = @(Get-PageImages $page)
@@ -263,11 +274,11 @@ foreach ($section in $mapSections) {
                 $titles = @(Get-PageImages ('Map:' + $page))
                 $file = Choose-TopDown $display $titles
             }
-            if ($file) { $url = Get-ImageThumbnail $file 1280 }
+            if ($file) { $url = Get-ImageOriginalUrl $file }
         }
 
         if ($url) {
-            $target = Download-Image $url $base
+            $target = Download-Image $url (Join-Path $mapDir $key)
             $mapOK++
             Log "map OK $display -> $target"
         } else {
@@ -276,12 +287,13 @@ foreach ($section in $mapSections) {
         }
     } catch {
         $errors++
+        $lastError = "map $display :: $($_.Exception.Message)"
         Log "map ERROR $display :: $($_.Exception.Message)"
     }
 }
 
-Write-Status
+Write-Status $lastError
 $markerName = if (![string]::IsNullOrWhiteSpace($MapName)) { 'asset-sync-' + (Safe-Key $MapName) + '.done' } else { 'asset-sync-catalog.done' }
 [IO.File]::WriteAllText((Join-Path $root $markerName), (Get-Date -Format 'o'), (New-Object Text.UTF8Encoding($false)))
-Log "asset sync complete towers=$towerOK maps=$mapOK misses=$misses errors=$errors"
+Log "asset sync complete towers=$towerOK maps=$mapOK misses=$misses errors=$errors apiFallbacks=$apiFallbacks downloadFallbacks=$downloadFallbacks"
 exit 0
