@@ -15,6 +15,7 @@ global LabEditorPanStartCenterX := 0.5
 global LabEditorPanStartCenterY := 0.5
 global LabEditorPanLastRender := 0
 global LabEditorDirectNavInstallAttempts := 0
+global LabEditorWheelLastRender := 0
 
 StrategyEditorIsActive() {
     global LabEditorCanvasBg, LabEditorSnapshot
@@ -72,11 +73,12 @@ StrategyEditorInteractiveMouseMove(wParam, lParam, msg, hwnd) {
     LabEditorViewport.CenterY := LabEditorPanStartCenterY - (dy / Max(1, LabEditorCanvasH)) * visibleH
     LabEditorViewport.ClampCenter()
 
-    ; Rendering a viewport involves GDI+, so cap live pan redraw to roughly 30 FPS.
-    if (!LabEditorPanLastRender || A_TickCount - LabEditorPanLastRender >= 33) {
+    ; GDI+ viewport generation is the expensive part. Coalescing to ~42 FPS gives
+    ; noticeably smoother motion than the old 30 FPS path while avoiding a render
+    ; for every raw WM_MOUSEMOVE message.
+    if (!LabEditorPanLastRender || A_TickCount - LabEditorPanLastRender >= 24) {
         LabEditorPanLastRender := A_TickCount
         StrategyEditorRenderBackground()
-        StrategyEditorRefreshVisuals()
     }
     return 0
 }
@@ -89,13 +91,12 @@ StrategyEditorInteractiveMouseUp(wParam, lParam, msg, hwnd) {
     LabEditorPanActive := false
     try DllCall("ReleaseCapture")
     StrategyEditorRenderBackground()
-    StrategyEditorRefreshVisuals()
     return 0
 }
 
 StrategyEditorInteractiveWheel(wParam, lParam, msg, hwnd) {
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
-    global LabEditorViewport
+    global LabEditorViewport, LabEditorWheelLastRender
 
     if !StrategyEditorIsActive()
         return
@@ -107,10 +108,14 @@ StrategyEditorInteractiveWheel(wParam, lParam, msg, hwnd) {
     delta := (wParam >> 16) & 0xFFFF
     if (delta > 32767)
         delta -= 65536
+    if (delta = 0)
+        return 0
 
     oldZoom := LabEditorViewport.Zoom
-    newZoom := Max(1.0, Min(4.0, oldZoom + (delta > 0 ? 0.25 : -0.25)))
-    if (newZoom = oldZoom)
+    ; Smaller proportional steps make mouse wheels and precision touchpads feel less jumpy.
+    zoomDelta := (delta / 120.0) * 0.15
+    newZoom := Max(1.0, Min(4.0, oldZoom + zoomDelta))
+    if (Abs(newZoom - oldZoom) < 0.001)
         return 0
 
     ; Keep the point under the mouse anchored while zooming.
@@ -130,9 +135,24 @@ StrategyEditorInteractiveWheel(wParam, lParam, msg, hwnd) {
     LabEditorViewport.CenterY := anchorY - fy * newVisibleH + newVisibleH / 2
     LabEditorViewport.ClampCenter()
 
-    StrategyEditorRenderBackground()
-    StrategyEditorRefreshVisuals()
+    ; Wheel events are already discrete, but some touchpads emit them rapidly.
+    ; Skip impossible-to-see intermediate frames and always keep the latest viewport state.
+    now := A_TickCount
+    if (!LabEditorWheelLastRender || now - LabEditorWheelLastRender >= 16) {
+        LabEditorWheelLastRender := now
+        StrategyEditorRenderBackground()
+    } else {
+        SetTimer(StrategyEditorWheelFlush, -16)
+    }
     return 0
+}
+
+StrategyEditorWheelFlush(*) {
+    global LabEditorWheelLastRender
+    if !StrategyEditorIsActive()
+        return
+    LabEditorWheelLastRender := A_TickCount
+    StrategyEditorRenderBackground()
 }
 
 StrategyEditorInstallDirectNavigation(*) {
