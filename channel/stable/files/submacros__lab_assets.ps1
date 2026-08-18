@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$ua = 'UltimateMacroStrategyLab/0.2.5 (private development; TDS Wiki asset cache)'
+$ua = 'UltimateMacroStrategyLab/0.2.6 (private development; TDS Wiki asset cache)'
 $root = Join-Path $env:APPDATA 'Ultimate_Macro\StrategyEditor'
 $towerDir = Join-Path $root 'TowerLibrary'
 $mapDir = Join-Path $root 'MapLibrary\reference'
@@ -53,30 +53,80 @@ function Invoke-Wiki([hashtable]$Params) {
         [Uri]::EscapeDataString([string]$k) + '=' + [Uri]::EscapeDataString([string]$query[$k])
     }
     $uri = 'https://tds.fandom.com/api.php?' + ($pairs -join '&')
-    return Invoke-RestMethod -Uri $uri -Headers @{ 'User-Agent'=$ua; 'Accept'='application/json' } -TimeoutSec 25
+
+    try {
+        return Invoke-RestMethod -UseBasicParsing -Uri $uri -Headers @{ 'User-Agent'=$ua; 'Accept'='application/json' } -TimeoutSec 25
+    } catch {
+        $primary = $_.Exception.Message
+        Log "wiki REST fallback :: $primary"
+        $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+        if (!$curl) { throw "TDS Wiki request failed and curl.exe is unavailable: $primary" }
+
+        $raw = & curl.exe -L --fail --silent --show-error --max-time 25 -A $ua -H 'Accept: application/json' $uri 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "TDS Wiki request failed via PowerShell and curl.exe: $($raw -join ' ')" }
+        $text = ($raw -join "`n")
+        if ([string]::IsNullOrWhiteSpace($text)) { throw 'TDS Wiki returned an empty response.' }
+        return $text | ConvertFrom-Json
+    }
 }
 
 function Remove-OldImageVariants([string]$BasePath) {
-    foreach ($ext in @('.png','.jpg','.jpeg','.bmp')) {
+    foreach ($ext in @('.png','.jpg','.jpeg','.bmp','.webp')) {
         Remove-Item -LiteralPath ($BasePath + $ext) -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-ImageExtension([string]$Path) {
+    if (!(Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 12) { return $null }
+    if ($bytes[0] -eq 0x89 -and $bytes[1] -eq 0x50 -and $bytes[2] -eq 0x4E -and $bytes[3] -eq 0x47) { return '.png' }
+    if ($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xD8 -and $bytes[2] -eq 0xFF) { return '.jpg' }
+    if ($bytes[0] -eq 0x42 -and $bytes[1] -eq 0x4D) { return '.bmp' }
+    if ([Text.Encoding]::ASCII.GetString($bytes,0,4) -eq 'RIFF' -and [Text.Encoding]::ASCII.GetString($bytes,8,4) -eq 'WEBP') { return '.webp' }
+    return $null
+}
+
+function Remove-InvalidCachedVariants([string]$BasePath) {
+    foreach ($ext in @('.png','.jpg','.jpeg','.bmp','.webp')) {
+        $path = $BasePath + $ext
+        if (!(Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $actual = Get-ImageExtension $path
+        if (!$actual -or $actual -eq '.webp') {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            Log "cache PURGE $path (invalid/unsupported image bytes)"
+        }
     }
 }
 
 function Download-Image([string]$Url,[string]$BasePath) {
     $tmp = $BasePath + '.download'
     Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-    $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $tmp -PassThru -Headers @{ 'User-Agent'=$ua; 'Accept'='image/png,image/jpeg,image/*;q=0.8' } -TimeoutSec 45
+
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $tmp -Headers @{ 'User-Agent'=$ua; 'Accept'='image/png,image/jpeg,image/*;q=0.8' } -TimeoutSec 45 | Out-Null
+    } catch {
+        $primary = $_.Exception.Message
+        Log "image REST fallback :: $primary"
+        $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+        if (!$curl) { throw "Image download failed and curl.exe is unavailable: $primary" }
+        $raw = & curl.exe -L --fail --silent --show-error --max-time 45 -A $ua -H 'Accept: image/png,image/jpeg,image/*;q=0.8' -o $tmp $Url 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Image download failed via PowerShell and curl.exe: $($raw -join ' ')" }
+    }
+
     if (!(Test-Path -LiteralPath $tmp) -or (Get-Item -LiteralPath $tmp).Length -lt 200) {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
         throw "Downloaded asset is empty: $Url"
     }
 
-    $contentType = [string]$response.Headers['Content-Type']
-    $ext = '.png'
-    if ($contentType -match 'jpe?g') { $ext = '.jpg' }
-    elseif ($contentType -match 'bmp') { $ext = '.bmp' }
-    elseif ($contentType -match 'webp') {
+    $ext = Get-ImageExtension $tmp
+    if (!$ext) {
         Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-        throw 'Wiki returned WebP; this build only caches Windows/GDI+ compatible PNG/JPEG assets.'
+        throw 'Downloaded response is not a supported image (possibly an HTML/error response).'
+    }
+    if ($ext -eq '.webp') {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        throw 'Image source returned WebP; Windows GDI+ cannot render it safely in this Lab build.'
     }
 
     Remove-OldImageVariants $BasePath
@@ -165,6 +215,8 @@ foreach ($section in $towerSections) {
     $display = if ($info -and $info.Contains('display')) { $info['display'] } else { $section }
     $page = if ($info -and $info.Contains('wikiPage')) { $info['wikiPage'] } else { $display }
     $key = Safe-Key $section
+    $base = Join-Path $towerDir $key
+    Remove-InvalidCachedVariants $base
     try {
         $url = $null
         $galleryTitles = @(Get-PageImages ($page + '/Gallery'))
@@ -177,7 +229,7 @@ foreach ($section in $towerSections) {
         if (!$url) { $url = Get-PageThumbnail ($page + '/Gallery') 192 }
 
         if ($url) {
-            $target = Download-Image $url (Join-Path $towerDir $key)
+            $target = Download-Image $url $base
             $towerOK++
             Log "tower OK $display -> $target"
         } else {
@@ -198,11 +250,10 @@ foreach ($section in $mapSections) {
     $display = if ($info -and $info.Contains('display')) { $info['display'] } else { $section }
     $page = if ($info -and $info.Contains('wikiPage')) { $info['wikiPage'] } else { $display }
     $key = Safe-Key $section
+    $base = Join-Path $mapDir $key
+    Remove-InvalidCachedVariants $base
     try {
         $url = $null
-
-        ; Current Fandom maps expose their interactive-map artwork through Map:<name>.
-        ; Prefer that before scraping old gallery-style "Top Down" filenames.
         $url = Get-PageThumbnail ('Map:' + $page) 1280
 
         if (!$url) {
@@ -216,7 +267,7 @@ foreach ($section in $mapSections) {
         }
 
         if ($url) {
-            $target = Download-Image $url (Join-Path $mapDir $key)
+            $target = Download-Image $url $base
             $mapOK++
             Log "map OK $display -> $target"
         } else {
