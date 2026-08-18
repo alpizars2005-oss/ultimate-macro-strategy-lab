@@ -69,11 +69,33 @@ LabMapResolve(mapName) {
     return {key: key, name: Trim(String(mapName)), wikiPage: Trim(String(mapName)), aliases: mapName}
 }
 
+LabMapImageUsable(path) {
+    if (path = "" || !FileExist(path))
+        return false
+    pBitmap := 0
+    try {
+        pBitmap := Gdip_CreateBitmapFromFile(path)
+        if !pBitmap
+            return false
+        return Gdip_GetImageWidth(pBitmap) > 0 && Gdip_GetImageHeight(pBitmap) > 0
+    } catch {
+        return false
+    } finally {
+        if pBitmap
+            try Gdip_DisposeImage(pBitmap)
+    }
+}
+
 LabMapFindCachedFile(dir, key) {
     for ext in ["png", "jpg", "jpeg", "bmp"] {
         path := dir "\" key "." ext
-        if FileExist(path)
+        if !FileExist(path)
+            continue
+        if LabMapImageUsable(path)
             return path
+        ; A previous network error may have left HTML/WebP under a PNG/JPG name.
+        ; Purge it so Sync Assets can retry instead of getting stuck forever.
+        try FileDelete(path)
     }
     return ""
 }
@@ -104,7 +126,7 @@ LabMapSaveCameraCapture(mapName, sourcePath) {
         return ""
     target := LabMapCameraDir() "\" entry.key ".png"
     FileCopy(sourcePath, target, true)
-    return target
+    return LabMapImageUsable(target) ? target : ""
 }
 
 class LabMapViewport {
@@ -179,7 +201,7 @@ class LabMapViewport {
 }
 
 LabMapRenderViewport(sourcePath, viewport, outputPath, width, height) {
-    if (sourcePath = "" || !FileExist(sourcePath))
+    if (sourcePath = "" || !LabMapImageUsable(sourcePath))
         return false
     pSource := Gdip_CreateBitmapFromFile(sourcePath)
     if !pSource
