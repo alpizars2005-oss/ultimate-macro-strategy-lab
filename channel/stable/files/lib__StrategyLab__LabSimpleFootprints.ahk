@@ -1,25 +1,21 @@
 #Requires AutoHotkey v2.0
 
-; Lightweight placement presentation layer.
+; Stable placement presentation layer.
 ;
-; The 0.3.7 experiment resized the marker HWND itself to the tower footprint. That
-; made numbered badges turn into huge filled blocks and caused the marker/guide layers
-; to visually fight each other during zoom and drag. Keep the responsibilities strict:
+; Rules:
+;   entry.ctrl = one small draggable marker HWND. Never resize it to footprint size.
+;   entry.ring = one transparent outline HWND sized to the placement footprint.
+;   unique placement-limit-1 towers may replace the text marker with ONE tiny portrait.
 ;
-;   entry.ctrl  = small draggable marker (18 px, 22 px selected)
-;   entry.ring  = transparent footprint outline, independently sized by the editor
-;
-; StrategyEditorPlacements already owns the geometry and drag path for both controls.
-; This module only supplies the clean outline asset, defaults to Selected guides, and
-; upgrades placement-limit-1 markers to their cached tower portrait when available.
+; This deliberately avoids stacking duplicate markers or creating live-game style cyan
+; halos. The neutral outline is a tiny shipped asset and the default mode is Selected.
 
-global LabSimpleFootprintsTickMs := 250
+global LabSimpleFootprintsTickMs := 750
 global LabSimpleFootprintsLastMode := ""
 global LabSimpleFootprintGuidePath := A_ScriptDir "\Resources\StrategyLab\Towers\footprint-guide.png"
 
-; A busy 30+ placement strategy is much easier to read when only the selected
-; footprint is visible by default. The existing All / Selected / Off cycle remains.
-global LabEditorRingMode
+; Top-level assignment is global in AHK v2. StrategyEditorPlacements initializes this
+; to "all" earlier in the include order; override it once here before a strategy loads.
 LabEditorRingMode := "selected"
 
 LabSimpleFootprintsInstallTemplate() {
@@ -50,8 +46,9 @@ LabSimpleFootprintsPortraitFor(entry) {
     if (tower.placementLimit != 1)
         return ""
 
-    ; Do not use the generic placeholder as a map marker. Wait until Sync Assets has
-    ; cached the real tower art, then reuse the already-small square preview cache.
+    ; Never use the generic placeholder as an in-map marker. Wait for Sync Assets to
+    ; cache the real tower art, then reuse the square preview already made for the
+    ; selected-unit panel. That keeps these marker images tiny and local.
     cached := LabTowerCachedPortraitPath(towerName)
     if (cached = "")
         return ""
@@ -61,7 +58,10 @@ LabSimpleFootprintsPortraitFor(entry) {
 }
 
 LabSimpleFootprintsUpgradeUniqueMarker(index, entry) {
-    global MainGui, LabEditorMarkerByHwnd, LabEditorSelectedRow
+    global MainGui, LabEditorDoc, LabEditorMarkerByHwnd, LabEditorSelectedRow
+
+    if !IsObject(LabEditorDoc) || !IsObject(entry)
+        return false
 
     ready := false
     try ready := entry.labUniquePortraitReady
@@ -73,16 +73,13 @@ LabSimpleFootprintsUpgradeUniqueMarker(index, entry) {
     if checkedNonUnique
         return false
 
-    towerName := ""
-    try towerName := LabEditorDoc.TowerNameForSlot(entry.placement.slot)
-    if (towerName = "") {
-        try entry.labUniquePortraitNotApplicable := true
+    towerName := LabEditorDoc.TowerNameForSlot(entry.placement.slot)
+    if (towerName = "")
         return false
-    }
 
     tower := LabTowerResolve(towerName)
     if (tower.placementLimit != 1) {
-        try entry.labUniquePortraitNotApplicable := true
+        entry.labUniquePortraitNotApplicable := true
         return false
     }
 
@@ -94,7 +91,9 @@ LabSimpleFootprintsUpgradeUniqueMarker(index, entry) {
         return false
 
     point := StrategyEditorPlacementPoint(entry.placement)
-    size := index = LabEditorSelectedRow ? 22 : 18
+    ; Slightly larger than numbered badges so the cached portrait is actually useful,
+    ; while still staying far smaller than any footprint guide.
+    size := index = LabEditorSelectedRow ? 30 : 24
     wasVisible := false
     oldHwnd := 0
     try wasVisible := entry.ctrl.Visible
@@ -104,7 +103,7 @@ LabSimpleFootprintsUpgradeUniqueMarker(index, entry) {
     try {
         marker := MainGui.Add("Picture",
             "x" (point.x - Floor(size / 2)) " y" (point.y - Floor(size / 2))
-            " w" size " h" size " Hidden +Border BackgroundTrans", portrait)
+            " w" size " h" size " Hidden BackgroundTrans", portrait)
         StrategyEditorSetCircularRegion(marker, size)
         marker.OnEvent("Click", StrategyEditorMarkerClicked.Bind(index))
     } catch {
@@ -115,8 +114,8 @@ LabSimpleFootprintsUpgradeUniqueMarker(index, entry) {
         return false
     }
 
-    ; Replace the old Text badge rather than stacking another control over it. This is
-    ; important: entry.ctrl remains the single authoritative draggable marker HWND.
+    ; Replace, never stack. entry.ctrl remains the single authoritative marker HWND
+    ; used by click/drag hit-testing.
     try entry.ctrl.Visible := false
     if oldHwnd {
         try LabEditorMarkerByHwnd.Delete(oldHwnd)
@@ -139,10 +138,25 @@ LabSimpleFootprintsStyleEntry(entry) {
     try guideReady := entry.labFootprintGuideReady
     if !guideReady && IsObject(entry.ring) && FileExist(LabSimpleFootprintGuidePath) {
         try {
+            ; Replace the old cyan GDI template in-place. The ring remains the same HWND,
+            ; so drag/zoom never creates another layer on top of the existing guide.
             entry.ring.Value := LabSimpleFootprintGuidePath
             entry.labFootprintGuideReady := true
         }
     }
+}
+
+LabSimpleFootprintsKeepUniqueMarkerSize(index, entry) {
+    global LabEditorSelectedRow
+    ready := false
+    try ready := entry.labUniquePortraitReady
+    if !ready || !IsObject(entry.ctrl)
+        return
+
+    point := StrategyEditorPlacementPoint(entry.placement)
+    size := index = LabEditorSelectedRow ? 30 : 24
+    try entry.ctrl.Move(point.x - Floor(size / 2), point.y - Floor(size / 2), size, size)
+    try StrategyEditorSetCircularRegion(entry.ctrl, size)
 }
 
 LabSimpleFootprintsApply(*) {
@@ -159,12 +173,11 @@ LabSimpleFootprintsApply(*) {
         LabSimpleFootprintsStyleEntry(entry)
         if LabSimpleFootprintsUpgradeUniqueMarker(index, entry)
             changedMarker := true
+        LabSimpleFootprintsKeepUniqueMarkerSize(index, entry)
     }
 
-    if (changedMarker) {
-        ; One layout refresh after replacing marker HWNDs keeps drag hit-testing,
-        ; selection sizing and visibility synchronized without a per-frame repaint loop.
-        try StrategyEditorRefreshMarkerSelection()
+    if changedMarker {
+        ; One synchronization pass after an HWND replacement. No per-frame rebuilds.
         try StrategyEditorApplyLayer()
     }
 
@@ -175,7 +188,7 @@ LabSimpleFootprintsApply(*) {
     }
 }
 
-; Install the neutral guide asset before any strategy is loaded so
-; StrategyEditorBuildMarkers() never creates the obsolete cyan template.
+; Install before any strategy is loaded so BuildMarkers uses the neutral guide from its
+; very first frame. The timer only handles lazy unique portraits and does no rendering.
 LabSimpleFootprintsInstallTemplate()
 SetTimer(LabSimpleFootprintsApply, LabSimpleFootprintsTickMs)
