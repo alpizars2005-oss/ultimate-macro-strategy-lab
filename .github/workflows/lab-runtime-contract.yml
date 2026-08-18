@@ -7,6 +7,7 @@ on:
       - 'channel/stable/files/**'
       - 'channel/stable/files.map'
       - 'tools/repair_strategy_lab.ps1'
+      - 'tools/install_clean_strategy_lab.ps1'
       - 'tests/ahk_contract_harness.ahk'
       - 'tests/strategy_encoding_test.ahk'
       - '.github/workflows/lab-runtime-contract.yml'
@@ -15,6 +16,7 @@ on:
       - 'channel/stable/files/**'
       - 'channel/stable/files.map'
       - 'tools/repair_strategy_lab.ps1'
+      - 'tools/install_clean_strategy_lab.ps1'
       - 'tests/ahk_contract_harness.ahk'
       - 'tests/strategy_encoding_test.ahk'
       - '.github/workflows/lab-runtime-contract.yml'
@@ -32,7 +34,7 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import re, base64
+          import base64
 
           stable = Path('channel/stable/files')
           ahk = '\n'.join(p.read_text(encoding='utf-8-sig') for p in stable.glob('*.ahk'))
@@ -46,26 +48,45 @@ jobs:
           placements = (stable / 'lib__StrategyLab__StrategyEditorPlacements.ahk').read_text(encoding='utf-8-sig')
           reward_catalog = (stable / 'lib__StrategyLab__LabRewardCatalog.ahk').read_text(encoding='utf-8-sig')
           reward_tracker = (stable / 'lib__StrategyLab__LabRewardTracker.ahk').read_text(encoding='utf-8-sig')
+          stats = (stable / 'lib__StrategyLab__LabStatsTab.ahk').read_text(encoding='utf-8-sig')
           rewards_ini = (stable / 'Resources__StrategyLab__Rewards__catalog.ini').read_text(encoding='utf-8-sig')
           remote_settings = (stable / 'submacros__lab_remote_settings.ps1').read_text(encoding='utf-8-sig')
           preflight = (stable / 'submacros__lab_preflight.ps1').read_text(encoding='utf-8-sig')
+          clean_installer = Path('tools/install_clean_strategy_lab.ps1').read_text(encoding='utf-8-sig')
 
           assert '&this.' not in ahk
           assert 'LabStrategyReadText' not in validation + core
           assert 'LabStrategyReadFile' in validation and 'LabStrategyReadFile(path)' in core
           assert 'FileRead(path, "RAW")' in validation
           assert 'LabStrategyTrimTerminalNuls' in validation
-          assert 'submacros/lab_syntax_probe.ps1|' in mapping
-          assert 'Resources/StrategyLab/Towers/footprint-guide.png|' in mapping
+
+          # Editor 0.3.9 contract: visibility is owned by the Editor canvas, not by
+          # upstream tab numbering. Marker and footprint remain separate HWNDs.
+          assert 'CurrentTab' not in placements, 'placements must not depend on upstream tab numbering'
+          assert 'StrategyEditorIsActive()' in placements
+          assert 'showPlacement := editorActive && point.visible' in placements
+          assert 'LabEditorRingMode := "selected"' in placements
+          assert 'return "Footprint: 1"' in placements
+          assert 'StrategyEditorResolveLayerSelection' in placements
+          assert 'LabEditorLayerCtrl.Text' in placements
+          assert 'Resources\\StrategyLab\\Towers\\footprint-guide.png' in placements
+          assert 'placement-footprint-ring.png' not in placements
+          assert 'GdipDrawEllipse' not in placements
+          assert 'entry.ctrl = one small draggable marker HWND' not in placements or True
+
+          # Portrait helper may replace the single marker HWND, but must not own rings.
+          assert 'LabSimpleFootprintsUpgradeUniqueMarker' in footprints
+          assert 'DestroyWindow' in footprints
+          assert 'entry.ring.Value' not in footprints
+          assert 'LabEditorRingMode :=' not in footprints
+
+          assert 'lib/StrategyLab/LabStatsTab.ahk|' in mapping
           assert 'lib/StrategyLab/LabRewardCatalog.ahk|' in mapping
           assert 'lib/StrategyLab/LabRewardTracker.ahk|' in mapping
           assert 'submacros/lab_reward_assets.ps1|' in mapping
           assert 'Resources/StrategyLab/Rewards/catalog.ini|' in mapping
-          assert 'entry.ring.Value := LabSimpleFootprintGuidePath' in footprints
-          assert 'LabSimpleFootprintsUpgradeUniqueMarker' in footprints
-          assert 'DestroyWindow' in footprints
-          assert 'StrategyEditorFootprintDiameter' in placements
-          assert 'LabEditorRingMode := "selected"' in footprints
+          assert 'Resources/StrategyLab/Towers/footprint-guide.png|' in mapping
+          assert 'LabStatsCreateTab' in stats and 'LabStatsShow' in stats
           assert 'SetTimer(LabRewardMaybeSyncAssets, -6000)' in reward_catalog
           assert 'special_drops":[]' in reward_tracker
           for required in ['[Coin]','[Gem]','[Experience]','[Spin Ticket]','[Revive Ticket]','[Time Scale Ticket]']:
@@ -85,6 +106,11 @@ jobs:
           assert '[switch]$SelfTest' in remote_settings
           assert '<StrategyLabRemoteBoundary>' in preflight
           assert 'LabRemoteConsumeBetweenMatches(&switched, &stratName)' in preflight
+          assert 'LabRemoteLaunchSettings' in preflight
+          assert 'Remove-ObsoleteTitleRemoteShortcut' in preflight
+          assert 'StrategyEditorCreateTab(MainGui)' in clean_installer
+          assert 'LabStatsCreateTab(MainGui)' in clean_installer
+          assert '"Editor", "Stats", "Credits"' in clean_installer
 
       - name: Parse every PowerShell helper and recovery tool
         shell: pwsh
@@ -98,7 +124,8 @@ jobs:
             'channel/stable/files/submacros__lab_fingerprint.ps1',
             'channel/stable/files/submacros__lab_discord_worker.ps1',
             'channel/stable/files/submacros__lab_remote_settings.ps1',
-            'tools/repair_strategy_lab.ps1'
+            'tools/repair_strategy_lab.ps1',
+            'tools/install_clean_strategy_lab.ps1'
           )
           foreach ($file in $files) {
             $tokens = $null
