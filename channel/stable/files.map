@@ -1,4 +1,4 @@
-# Strategy Lab stable delivery map 0.2.14 polish + startup repair
+# Strategy Lab stable delivery map 0.2.16 startup path hotfix
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 run_lab.bat|channel/stable/files/run_lab.bat|raw
