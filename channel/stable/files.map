@@ -1,3 +1,4 @@
+# Strategy Lab stable delivery map 0.2.9
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 lib/StrategyLab/LabUpdater.ahk|channel/stable/files/lib__StrategyLab__LabUpdater.ahk|raw
