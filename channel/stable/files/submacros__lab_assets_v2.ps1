@@ -138,8 +138,8 @@ function Get-ImageKind([string]$Path) {
 function Save-Jpeg([System.Drawing.Bitmap]$Bitmap,[string]$Path,[int]$Quality) {
     $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
         Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
-    $parameters = New-Object System.Drawing.Imaging.EncoderParameters(1)
-    $parameters.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter(
+    $parameters = [System.Drawing.Imaging.EncoderParameters]::new(1)
+    $parameters.Param[0] = [System.Drawing.Imaging.EncoderParameter]::new(
         [System.Drawing.Imaging.Encoder]::Quality, [long]$Quality
     )
     try {
@@ -171,7 +171,7 @@ function Optimize-Image([string]$InputPath,[string]$BasePath,[ValidateSet('tower
         $newW = [Math]::Max(1, [int][Math]::Round($image.Width * $scale))
         $newH = [Math]::Max(1, [int][Math]::Round($image.Height * $scale))
 
-        $bitmap = New-Object System.Drawing.Bitmap($newW, $newH)
+        $bitmap = [System.Drawing.Bitmap]::new($newW, $newH)
         $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
         $graphics.Clear([System.Drawing.Color]::FromArgb(23,23,23))
         $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
