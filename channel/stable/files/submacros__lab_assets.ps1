@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$ua = 'UltimateMacroStrategyLab/0.2.4 (private development; TDS Wiki asset cache)'
+$ua = 'UltimateMacroStrategyLab/0.2.5 (private development; TDS Wiki asset cache)'
 $root = Join-Path $env:APPDATA 'Ultimate_Macro\StrategyEditor'
 $towerDir = Join-Path $root 'TowerLibrary'
 $mapDir = Join-Path $root 'MapLibrary\reference'
@@ -114,6 +114,23 @@ function Get-ImageThumbnail([string]$FileTitle,[int]$Width=1280) {
     return $null
 }
 
+function Choose-DefaultTowerImage([string]$TowerName,[string[]]$Titles) {
+    $norm = ($TowerName -replace '[^A-Za-z0-9]','').ToLowerInvariant()
+    $ranked = foreach ($title in $Titles) {
+        $name = $title -replace '^File:',''
+        $flat = ($name -replace '[^A-Za-z0-9]','').ToLowerInvariant()
+        $score = 0
+        if ($flat.Contains($norm)) { $score += 45 }
+        if ($name -match '(?i)default') { $score += 80 }
+        if ($name -match '(?i)icon|render|portrait|static|dynamic') { $score += 25 }
+        if ($name -match '(?i)golden|skin|crate|weapon|sound|ogg|gif|face|concept|upgrade|level[1-9]') { $score -= 90 }
+        [PSCustomObject]@{Title=$title; Score=$score}
+    }
+    $best = $ranked | Sort-Object Score -Descending | Select-Object -First 1
+    if ($best -and $best.Score -ge 100) { return [string]$best.Title }
+    return $null
+}
+
 function Choose-TopDown([string]$MapName,[string[]]$Titles) {
     $norm = ($MapName -replace '[^A-Za-z0-9]','').ToLowerInvariant()
     $ranked = foreach ($title in $Titles) {
@@ -149,15 +166,23 @@ foreach ($section in $towerSections) {
     $page = if ($info -and $info.Contains('wikiPage')) { $info['wikiPage'] } else { $display }
     $key = Safe-Key $section
     try {
-        $url = Get-PageThumbnail $page 192
+        $url = $null
+        $galleryTitles = @(Get-PageImages ($page + '/Gallery'))
+        $defaultFile = Choose-DefaultTowerImage $display $galleryTitles
+        if ($defaultFile) {
+            $url = Get-ImageThumbnail $defaultFile 192
+            if ($url) { Log "tower DEFAULT $display [$defaultFile]" }
+        }
+        if (!$url) { $url = Get-PageThumbnail $page 192 }
         if (!$url) { $url = Get-PageThumbnail ($page + '/Gallery') 192 }
+
         if ($url) {
             $target = Download-Image $url (Join-Path $towerDir $key)
             $towerOK++
             Log "tower OK $display -> $target"
         } else {
             $misses++
-            Log "tower MISS $display (no page thumbnail)"
+            Log "tower MISS $display (no suitable default portrait)"
         }
     } catch {
         $errors++
