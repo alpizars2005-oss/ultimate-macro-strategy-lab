@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 #Include "%A_ScriptDir%\lib\StrategyLab\MapLibrary.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\TowerCatalog.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\StrategyCalibration.ahk"
 
 ; Integrated Strategy Editor tab for Main_Lab.ahk.
 
