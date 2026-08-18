@@ -67,9 +67,15 @@ jobs:
               'lib/StrategyLab/StrategyCalibration.ahk',
               'lib/StrategyLab/MapLibrary.ahk',
               'lib/StrategyLab/TowerCatalog.ahk',
+              'lib/StrategyLab/LabStrategyValidation.ahk',
+              'lib/StrategyLab/LabSafety.ahk',
+              'lib/StrategyLab/LabTelemetry.ahk',
+              'lib/StrategyLab/LabRemoteGate.ahk',
               'submacros/lab_calibration_worker.ahk',
               'submacros/lab_assets.ps1',
               'submacros/lab_update.ps1',
+              'submacros/lab_discord_worker.ps1',
+              'submacros/lab_remote_settings.ps1',
           }
           assert required <= targets, f'missing update targets: {sorted(required - targets)}'
           assert source_for['submacros/lab_assets.ps1'].endswith('submacros__lab_assets_v3.ps1')
@@ -82,6 +88,46 @@ jobs:
           assert 'Normalize-InstallDir' in preflight
           assert ".Trim('\"')" in preflight
           assert '[IO.Path]::GetFullPath' in preflight
+          assert 'Install-RemoteBoundary' in preflight
+          assert 'LabRemoteConsumeBetweenMatches(&switched, &stratName)' in preflight
+          assert 'never touch PlayStrategy' in preflight
+
+          tab = (root / source_for['lib/StrategyLab/StrategyEditorTab.ahk']).read_text(encoding='utf-8-sig')
+          for module in ['LabStrategyValidation.ahk', 'LabSafety.ahk', 'LabTelemetry.ahk', 'LabRemoteGate.ahk']:
+              assert module in tab
+
+          validation = (root / source_for['lib/StrategyLab/LabStrategyValidation.ahk']).read_text(encoding='utf-8-sig')
+          assert '5 MB editor safety limit' in validation
+          assert '5,000 SpawnTower placements' in validation
+
+          safety = (root / source_for['lib/StrategyLab/LabSafety.ahk']).read_text(encoding='utf-8-sig')
+          assert 'Hotkey("F12"' in safety
+          assert 'LabReleaseHeldInputs' in safety
+
+          telemetry = (root / source_for['lib/StrategyLab/LabTelemetry.ahk']).read_text(encoding='utf-8-sig')
+          assert 'runs.jsonl' in telemetry
+          assert 'heartbeat.ini' in telemetry
+          assert 'Get-FileHash' in telemetry
+
+          remote = (root / source_for['lib/StrategyLab/LabRemoteGate.ahk']).read_text(encoding='utf-8-sig')
+          assert 'LabRemoteConsumeBetweenMatches' in remote
+          assert 'LoadStrategyFile(path)' in remote
+          assert 'LabRemoteResetSessionStats' in remote
+          assert 'ProcessClose(LabRemoteWorkerPid)' in remote
+
+          discord = (root / source_for['submacros/lab_discord_worker.ps1']).read_text(encoding='utf-8-sig')
+          assert 'ProtectedData]::Unprotect' in discord
+          assert 'cursor seeded at' in discord
+          assert '?after=$lastMessage' in discord
+          assert '!screenshot' in discord
+          assert '!strategy list' in discord
+          assert '!rings all|selected|off' in discord
+          assert 'Allowed' not in discord or 'UserID' in discord
+
+          remote_settings = (root / source_for['submacros/lab_remote_settings.ps1']).read_text(encoding='utf-8-sig')
+          assert 'ProtectedData]::Protect' in remote_settings
+          assert 'Enable Discord remote' in remote_settings
+          assert 'Allowed user ID' in remote_settings
 
           placements = (root / source_for['lib/StrategyLab/StrategyEditorPlacements.ahk']).read_text(encoding='utf-8-sig')
           assert 'LabEditorLayerOptions' in placements
@@ -95,6 +141,8 @@ jobs:
           ui = (root / source_for['lib/StrategyLab/StrategyEditorUi.ahk']).read_text(encoding='utf-8-sig')
           assert 'LabEditorRingsBtn' in ui
           assert 'StrategyEditorToggleRings' in ui
+          assert 'LabEditorRemoteBtn' in ui
+          assert 'LabRemoteLaunchSettings' in ui
 
           workspace = (root / source_for['lib/StrategyLab/StrategyEditorWorkspace.ahk']).read_text(encoding='utf-8-sig')
           assert 'LabEditorHeaderLine.Move(20, 137, 960, 1)' in workspace
@@ -145,7 +193,9 @@ jobs:
           $files = @(
             'channel/stable/files/submacros__lab_assets_v3.ps1',
             'channel/stable/files/submacros__lab_update.ps1',
-            'channel/stable/files/submacros__lab_preflight.ps1'
+            'channel/stable/files/submacros__lab_preflight.ps1',
+            'channel/stable/files/submacros__lab_discord_worker.ps1',
+            'channel/stable/files/submacros__lab_remote_settings.ps1'
           )
           foreach ($file in $files) {
             $tokens = $null
