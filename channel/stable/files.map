@@ -1,10 +1,11 @@
-# Strategy Lab stable delivery map 0.3.4 ByRef parser hotfix
+# Strategy Lab stable delivery map 0.3.5 reliability pass
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 run_lab.bat|channel/stable/files/run_lab.bat|raw
 lib/StrategyLab/LabUpdater.ahk|channel/stable/files/lib__StrategyLab__LabUpdater.ahk|raw
 submacros/lab_update.ps1|channel/stable/files/submacros__lab_update.ps1|raw
 submacros/lab_preflight.ps1|channel/stable/files/submacros__lab_preflight.ps1|raw
+submacros/lab_syntax_probe.ps1|channel/stable/files/submacros__lab_syntax_probe.ps1|raw
 lib/StrategyLab/StrategyEditorCore.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorCore.ahk|raw
 lib/StrategyLab/StrategyEditorTab.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorTab.ahk|raw
 lib/StrategyLab/StrategyEditorUi.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorUi.ahk|raw
