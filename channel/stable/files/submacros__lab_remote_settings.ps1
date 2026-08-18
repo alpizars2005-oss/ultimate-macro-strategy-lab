@@ -14,7 +14,12 @@ function Log([string]$Text) {
 function Show-Fatal([string]$Message) {
     try {
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
-        [Windows.Forms.MessageBox]::Show($Message + "`r`n`r`nSee:`r`n" + $logPath, 'Strategy Lab Remote', 'OK', 'Error') | Out-Null
+        [Windows.Forms.MessageBox]::Show(
+            $Message + "`r`n`r`nSee:`r`n" + $logPath,
+            'Strategy Lab Remote',
+            [Windows.Forms.MessageBoxButtons]::OK,
+            [Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
     } catch {}
 }
 
@@ -25,7 +30,7 @@ try {
 
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
-    try { Add-Type -AssemblyName System.Security -ErrorAction Stop } catch { Log ('INFO System.Security assembly already available/not separately loadable: ' + $_.Exception.Message) }
+    try { Add-Type -AssemblyName System.Security -ErrorAction Stop } catch { Log ('INFO System.Security already available/not separately loadable: ' + $_.Exception.Message) }
     [Windows.Forms.Application]::EnableVisualStyles()
 
     $configPath = Join-Path $root 'remote.ini'
@@ -46,7 +51,7 @@ try {
             }
             $eq = $line.IndexOf('=')
             if ($eq -gt 0 -and $section) {
-                $result[$section][$line.Substring(0, $eq).Trim().ToLowerInvariant()] = $line.Substring($eq + 1).Trim()
+                $result[$section][$line.Substring(0,$eq).Trim().ToLowerInvariant()] = $line.Substring($eq+1).Trim()
             }
         }
         return $result
@@ -81,13 +86,22 @@ try {
         $protected = Protect-Token $Token
         $text = "[Remote]`r`nEnabled=" + ($(if($Enabled){'1'}else{'0'})) + "`r`nChannelID=$Channel`r`nUserID=$User`r`nPollSeconds=$Poll`r`nTokenProtected=$protected`r`n"
         [IO.File]::WriteAllText($configPath,$text,(New-Object Text.UTF8Encoding($false)))
-        Log ("INFO remote config saved. Enabled={0} Channel={1} User={2} Poll={3}" -f $Enabled,$Channel,$User,$Poll)
+        Log ("INFO config saved Enabled={0} Channel={1} User={2} Poll={3}" -f $Enabled,$Channel,$User,$Poll)
     }
 
     function Send-Test([string]$Token,[string]$Channel) {
-        $headers=@{Authorization=('Bot '+$Token);'User-Agent'='UltimateMacroStrategyLab/0.3.3'}
+        $headers=@{Authorization=('Bot '+$Token);'User-Agent'='UltimateMacroStrategyLab/0.3.5'}
         $payload=@{content='✅ Ultimate Macro Strategy Lab remote is connected.';allowed_mentions=@{parse=@()}} | ConvertTo-Json -Depth 4 -Compress
         Invoke-RestMethod -Uri "$apiBase/channels/$Channel/messages" -Headers $headers -Method Post -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($payload)) | Out-Null
+    }
+
+    function Start-DiscordWorker {
+        if (!(Test-Path -LiteralPath $workerPath -PathType Leaf)) { throw "Discord worker is missing: $workerPath" }
+        # Start-Process flattens ArgumentList arrays in Windows PowerShell. Embed quotes
+        # explicitly so installations inside folders containing spaces remain valid.
+        $args = '-NoLogo -NoProfile -ExecutionPolicy Bypass -File "{0}" -InstallDir "{1}"' -f $workerPath,$InstallDir
+        $p = Start-Process -FilePath 'powershell.exe' -ArgumentList $args -WorkingDirectory $InstallDir -WindowStyle Hidden -PassThru
+        Log ("INFO Discord worker launch requested PID={0}" -f $p.Id)
     }
 
     $ini=Read-Ini $configPath
@@ -102,6 +116,7 @@ try {
     $form.FormBorderStyle='FixedDialog'
     $form.MaximizeBox=$false
     $form.MinimizeBox=$false
+    $form.TopMost=$true
 
     $title=New-Object Windows.Forms.Label
     $title.Text='Discord Remote'
@@ -156,7 +171,7 @@ try {
     $status=New-Object Windows.Forms.Label
     $status.Text='Ready.'
     $status.Location=New-Object Drawing.Point(150,369)
-    $status.Size=New-Object Drawing.Size(190,28)
+    $status.Size=New-Object Drawing.Size(205,28)
     $status.ForeColor=[Drawing.Color]::Silver
     $form.Controls.Add($status)
 
@@ -170,37 +185,38 @@ try {
 
     $test.Add_Click({
         try {
-            $status.Text='Testing…'
+            $status.Text='Testing...'
             if(!$token.Text.Trim() -or !$channel.Text.Trim()){ throw 'Token and Channel ID are required.' }
+            if($channel.Text.Trim() -notmatch '^\d{15,22}$'){ throw 'Channel ID must be the numeric Discord channel ID.' }
             Send-Test $token.Text.Trim() $channel.Text.Trim()
             $status.Text='Connected.'
-            [Windows.Forms.MessageBox]::Show('Test message sent successfully.','Strategy Lab Remote','OK','Information') | Out-Null
+            [Windows.Forms.MessageBox]::Show('Test message sent successfully.','Strategy Lab Remote',[Windows.Forms.MessageBoxButtons]::OK,[Windows.Forms.MessageBoxIcon]::Information) | Out-Null
         } catch {
             $status.Text='Test failed.'
             Log ('ERROR bot test: ' + $_.Exception.Message)
-            [Windows.Forms.MessageBox]::Show($_.Exception.Message,'Bot test failed','OK','Error') | Out-Null
+            [Windows.Forms.MessageBox]::Show($_.Exception.Message,'Bot test failed',[Windows.Forms.MessageBoxButtons]::OK,[Windows.Forms.MessageBoxIcon]::Error) | Out-Null
         }
     })
 
     $save.Add_Click({
         try {
             if($enabled.Checked -and (!$token.Text.Trim() -or !$channel.Text.Trim() -or !$user.Text.Trim())){ throw 'Token, Channel ID and Allowed User ID are required when remote is enabled.' }
+            if($channel.Text.Trim() -and $channel.Text.Trim() -notmatch '^\d{15,22}$'){ throw 'Channel ID must be numeric.' }
+            if($user.Text.Trim() -and $user.Text.Trim() -notmatch '^\d{15,22}$'){ throw 'Allowed user ID must be numeric.' }
             $p=4
             if([int]::TryParse($poll.Text.Trim(),[ref]$p) -eq $false){ throw 'Poll interval must be a number.' }
             $p=[Math]::Max(2,[Math]::Min(30,$p))
             Save-Config $enabled.Checked $token.Text.Trim() $channel.Text.Trim() $user.Text.Trim() $p
-            if($enabled.Checked) {
-                if (!(Test-Path -LiteralPath $workerPath -PathType Leaf)) { throw "Discord worker is missing: $workerPath" }
-                Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$workerPath,'-InstallDir',$InstallDir) -WorkingDirectory $InstallDir -WindowStyle Hidden
-            }
-            [Windows.Forms.MessageBox]::Show('Remote settings saved.','Strategy Lab Remote','OK','Information') | Out-Null
+            if($enabled.Checked) { Start-DiscordWorker }
+            [Windows.Forms.MessageBox]::Show('Remote settings saved.','Strategy Lab Remote',[Windows.Forms.MessageBoxButtons]::OK,[Windows.Forms.MessageBoxIcon]::Information) | Out-Null
             $form.Close()
         } catch {
             Log ('ERROR save/start: ' + $_.Exception.Message)
-            [Windows.Forms.MessageBox]::Show($_.Exception.Message,'Could not save','OK','Error') | Out-Null
+            [Windows.Forms.MessageBox]::Show($_.Exception.Message,'Could not save',[Windows.Forms.MessageBoxButtons]::OK,[Windows.Forms.MessageBoxIcon]::Error) | Out-Null
         }
     })
 
+    $form.Add_Shown({ $form.Activate() })
     Log ('INFO remote settings UI opened from ' + $InstallDir)
     [void]$form.ShowDialog()
     Log 'INFO remote settings UI closed.'
