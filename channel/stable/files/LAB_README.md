@@ -1,67 +1,110 @@
-# Ultimate Macro Strategy Lab 0.2.7
+# Ultimate Macro Strategy Lab 0.3.0
 
-Private experimental build based on Darksen's official Ultimate Macro 1.3.3.
+Private experimental build based on Darksen's Ultimate Macro, with Strategy Lab features layered on top instead of replacing the upstream macro workflow.
 
-## Strategy Editor 0.2.7
+## What 0.3.0 integrates
 
-This build fixes the remaining startup/state and asset-cache problems found during live Windows testing of 0.2.6.
+Strategy Lab now consolidates the useful macro-related work from the repositories available to this project:
 
-### Direct tactical interaction
+- The visual Strategy Editor, calibrated map workflow, local tower portrait cache and placement-footprint guides from Strategy Lab.
+- The safe command queue and between-match switching model from `ultimate-macro-remote`.
+- Reliability ideas from `Macro-Recorder-JSON`: strict input validation, a global emergency stop, held-input cleanup and lightweight local run telemetry.
+- The current Ultimate Macro gameplay/recording feature set remains upstream-owned and is not duplicated inside Strategy Lab.
 
-- Mouse wheel zooms the tactical map directly under the cursor.
-- Click + drag empty map space pans the zoomed viewport.
-- Click + drag a placement moves that placement through the existing safe coordinate-editing path.
-- The legacy four pan-arrow buttons remain disabled/hidden.
-- The interaction layer no longer reads Main.ahk's `CurrentTab` global. It determines Editor activity from the actual Editor canvas controls instead, eliminating startup crashes when upstream tab state has not been assigned yet.
-- Live panning remains capped to roughly 30 FPS because viewport rendering uses GDI+.
+Unrelated repositories such as portfolio, coursework, job-search and food/inventory projects are intentionally not copied into the macro.
 
-### Loaded-state repair
+## Visual Strategy Editor
 
-- The Editor state guard now runs based on actual Editor visibility instead of `CurrentTab`.
-- If a strategy is loaded but stale UI text still says `No strategy loaded.`, the dirty/status summary is refreshed automatically.
-- If the details panel loses its selected row during an asynchronous refresh, the first placement is selected again without altering strategy data.
+- Mouse wheel zooms under the cursor.
+- Click + drag empty map space pans the viewport.
+- Click + drag a placement moves it through the safe coordinate-editing path.
+- Exact camera captures are authoritative for editing; Wiki artwork is reference-only.
+- Tower portraits are downloaded only when needed, cached locally and aspect-fitted into the selected-unit card.
+- Circular placement markers and optional footprint circles can be shown for all towers, only the selected tower or hidden.
+- Layer filtering affects both the map and placement table.
+- The Editor automatically expands the Ultimate Macro window into a larger workspace and restores the compact size when leaving the tab.
+- Map frame swaps use an atomic whole-window redraw boundary to reduce tearing/flicker while panning and zooming.
 
-### Map / portrait cache validation
+## Safe strategy loading and saving
 
-- Cached map images and tower portraits are validated with GDI+ before use.
-- Invalid files are automatically deleted so a stale HTML/WebP/error response cannot remain permanently cached under a `.png`/`.jpg` filename.
-- Exact macro-camera captures remain authoritative for coordinate editing.
-- Wiki/Interactive-Map artwork remains reference-only until exact calibration exists.
+Before the Editor loads a `.strat`, Strategy Lab rejects clearly malformed or unreasonable files, including empty files, missing `[Steps]`, oversized files, excessive placement counts and extreme placement coordinates.
 
-### Asset sync reliability
+For live testing, prefer **Save Copy** first. `Overwrite + automatic backup` creates a timestamped backup before replacing a strategy.
 
-The 0.2.7 synchronizer moves the fallback to the correct layer:
+The editor only rewrites the selected `SpawnTower(x, y, ...)` coordinates. Upgrade, sell, targeting, autoskip, abilities, waits and unknown/future strategy actions are preserved.
 
-- MediaWiki JSON/API queries first use PowerShell `Invoke-RestMethod` and automatically retry through Windows `curl.exe` if the request is blocked or fails.
-- Image downloads first use PowerShell and also retry with `curl.exe`.
-- The synchronizer requests original Wiki image files whenever possible instead of thumbnail URLs, reducing accidental WebP responses that GDI+ cannot decode.
-- Downloaded bytes are signature-checked as PNG/JPEG/BMP before entering the cache.
-- The status file records real tower/map counts, misses/errors, API fallback count and download fallback count.
+## Discord Remote
 
-### Tactical editor UX
+Open **Editor → Remote** to configure the built-in Discord controller.
 
-- Dark readable placement table.
-- First placement selected automatically.
-- Selected marker is visually larger.
-- Unique towers omit unnecessary `#1`; multi-placement towers show their occurrence number.
-- Tower details show portrait, display name, slot, X/Y and placement-limit metadata.
-- `100%`, `Fit`, `Expand` and `Sync Assets` remain available as explicit controls.
+The settings helper stores the bot token with Windows DPAPI for the current Windows user. The plaintext token is not written to the Strategy Lab configuration file. Configure:
 
-## Saving
+- Bot token
+- Private Channel ID
+- Allowed Discord User ID
+- Poll interval
 
-For live testing, prefer **Save Copy** first. `Overwrite + automatic backup` always creates a timestamped backup before replacing a strategy.
+Recommended bot permissions are View Channel, Send Messages, Read Message History and Attach Files. Message Content Intent must be enabled for text commands.
 
-The editor only rewrites the first two arguments of the selected `SpawnTower(x, y, ...)` line. `UpgradeTower`, `SellTower`, `ChangeTargets`, `ToggleAutoskip`, abilities, waits and unknown future actions remain untouched.
+Supported commands:
 
-## Reward Tracker
+```text
+!help
+!ping
+!status
+!screenshot
+!strategy list
+!start <strategy>
+!switch <strategy>
+!strategy <strategy>
+!stop
+!stop now
+!rings all
+!rings selected
+!rings off
+!recalibrate
+```
 
-The reward tracker remains isolated at the result/watchdog boundary. It does not poll inside timing-sensitive `PlayStrategy()` execution.
+The worker deliberately seeds its Discord cursor from the newest existing message and does **not** execute that message. Only newer messages from the configured user are processed, preventing stale commands from replaying after a restart.
 
-## Auto updater / build safety
+Network polling and screenshot upload run in a separate PowerShell worker. Gameplay-changing commands are written to tiny local INI queues. Safe stop and switch are consumed only at the `RunStrategy()` between-match boundary; Strategy Lab never inserts remote polling into `PlayStrategy()`.
 
-- Private updates remain SHA-256 verified and automatically backed up.
-- `Resources\Strats` remains rejected as an updater target.
-- Stable update hashes are generated automatically in GitHub from `channel/stable/files.map`.
-- CI sanity checks validate the update source map, run Python tests and parse PowerShell helpers.
+A remote switch loads the new strategy before the next match. A safe stop marks the macro stopped, kills submacros and releases held input. `!stop now` invokes the emergency-stop path.
 
-A real Windows AutoHotkey/Roblox run remains the final acceptance test for GUI interaction and live Wiki asset retrieval.
+## Emergency stop
+
+`F12` is reserved by Strategy Lab as a global emergency stop. It stops the strategy when possible and releases common held keyboard/mouse inputs. The same cleanup runs when Strategy Lab exits.
+
+## Local telemetry
+
+Strategy Lab observes official `state.ini` counters once per second and keeps local diagnostics under:
+
+```text
+%APPDATA%\Ultimate_Macro\StrategyEditor\telemetry\
+```
+
+- `heartbeat.ini` records whether the Lab is stopped/running/playback plus the current strategy and counters.
+- `runs.jsonl` appends one local entry when the official win/loss counters advance and includes a SHA-256 fingerprint of the strategy file.
+
+No OCR/network polling is added inside timing-sensitive strategy playback.
+
+## Automatic map calibration
+
+The calibration worker watches Ultimate Macro state and captures a clean Roblox camera reference the first time a map/resolution combination is encountered. Camera captures are kept under AppData rather than shipped inside the macro package, keeping Strategy Lab small.
+
+## Asset caching
+
+Tower and map artwork is stored under `%APPDATA%\Ultimate_Macro\StrategyEditor`. Downloads are validated before entering the cache and converted to small Windows/GDI+-friendly local derivatives. Invalid HTML/WebP/error responses are purged rather than reused forever.
+
+## Auto updater / preflight safety
+
+- Stable update files are SHA-256 verified.
+- Existing files are backed up before replacement.
+- `Resources\Strats` is never an updater target.
+- Updates restart Strategy Lab after installation.
+- `run_lab.bat` executes preflight before AutoHotkey parses `Main_Lab.ahk`.
+- Preflight normalizes Windows paths, repairs only known high-confidence parser corruption, refuses merge-conflicted files and installs the Discord safe-boundary hook idempotently.
+- The remote hook is inserted only in `RunStrategy()` at the between-match boundary; `PlayStrategy()` is intentionally untouched.
+- CI checks the stable delivery map, Python tests, PowerShell parsing and the expected safety/remote integration markers.
+
+A real Windows + AutoHotkey + Roblox run remains the final acceptance test for live input, camera geometry, Discord permissions and game UI changes.
