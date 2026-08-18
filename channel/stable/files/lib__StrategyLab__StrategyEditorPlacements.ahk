@@ -4,8 +4,11 @@ global LabEditorDragLastFrame := 0
 global LabEditorDragLastStatus := 0
 global LabEditorDragPreviewX := ""
 global LabEditorDragPreviewY := ""
+global LabEditorDragRing := ""
 global LabEditorLayerOptions := ["All placements"]
 global LabEditorListRowMap := []
+global LabEditorRingMode := "all"
+global LabEditorRingTemplatePath := ""
 
 StrategyEditorBuildLayers() {
     global LabEditorDoc, LabEditorLayerCtrl, LabEditorLayer, LabEditorLayerOptions
@@ -53,26 +56,147 @@ StrategyEditorMarkerClicked(index, *) {
     StrategyEditorSelectPlacement(index)
 }
 
+StrategyEditorSetCircularRegion(ctrl, size) {
+    if !IsObject(ctrl) || size <= 0
+        return
+    region := DllCall("gdi32\CreateEllipticRgn", "Int", 0, "Int", 0, "Int", size + 1, "Int", size + 1, "Ptr")
+    if !region
+        return
+    if !DllCall("user32\SetWindowRgn", "Ptr", ctrl.Hwnd, "Ptr", region, "Int", 1)
+        DllCall("gdi32\DeleteObject", "Ptr", region)
+}
+
+; One tiny alpha PNG is stretched for every placement footprint. Keeping it in
+; AppData avoids shipping another binary asset and keeps the stable package tiny.
+StrategyEditorRingImagePath() {
+    global LabEditorRingTemplatePath
+    if (LabEditorRingTemplatePath != "" && FileExist(LabEditorRingTemplatePath))
+        return LabEditorRingTemplatePath
+
+    dir := A_AppData "\Ultimate_Macro\StrategyEditor\ui"
+    if !DirExist(dir)
+        DirCreate(dir)
+    path := dir "\placement-footprint-ring.png"
+    if FileExist(path) {
+        LabEditorRingTemplatePath := path
+        return path
+    }
+
+    pBitmap := 0
+    graphics := 0
+    pen := 0
+    try {
+        canvas := 256
+        inset := 10.0
+        pBitmap := Gdip_CreateBitmap(canvas, canvas)
+        if !pBitmap
+            return ""
+        graphics := Gdip_GraphicsFromImage(pBitmap)
+        if !graphics
+            return ""
+        DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", graphics, "Int", 4)
+        DllCall("gdiplus\GdipCreatePen1", "UInt", 0xD035BFFF, "Float", 7.0, "Int", 2, "Ptr*", &pen)
+        if !pen
+            return ""
+        DllCall("gdiplus\GdipDrawEllipse", "Ptr", graphics, "Ptr", pen,
+            "Float", inset, "Float", inset,
+            "Float", canvas - (inset * 2), "Float", canvas - (inset * 2))
+        Gdip_SaveBitmapToFile(pBitmap, path)
+        if FileExist(path) && FileGetSize(path) > 300 {
+            LabEditorRingTemplatePath := path
+            return path
+        }
+    } catch {
+        return ""
+    } finally {
+        if pen
+            try DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+        if graphics
+            try Gdip_DeleteGraphics(graphics)
+        if pBitmap
+            try Gdip_DisposeImage(pBitmap)
+    }
+    return ""
+}
+
+StrategyEditorPlacementFootprint(placement) {
+    global LabEditorDoc
+    tower := LabEditorDoc.TowerNameForSlot(placement.slot)
+    return tower != "" ? LabTowerPlacementFootprint(tower) : 1.5
+}
+
+StrategyEditorFootprintDiameter(placement) {
+    global LabEditorViewport
+    footprint := StrategyEditorPlacementFootprint(placement)
+    ; Average footprint 1.5 is 28px at 100%. Zoom scales the guide with the map.
+    diameter := Round(28 * (footprint / 1.5) * LabEditorViewport.Zoom)
+    return Max(18, Min(150, diameter))
+}
+
+StrategyEditorRingModeAllows(index) {
+    global LabEditorRingMode, LabEditorSelectedRow
+    if (LabEditorRingMode = "off")
+        return false
+    if (LabEditorRingMode = "selected")
+        return index = LabEditorSelectedRow
+    return true
+}
+
+StrategyEditorRingButtonText() {
+    global LabEditorRingMode
+    if (LabEditorRingMode = "selected")
+        return "Rings: 1"
+    if (LabEditorRingMode = "off")
+        return "Rings: Off"
+    return "Rings: All"
+}
+
+StrategyEditorToggleRings(*) {
+    global LabEditorRingMode, LabEditorRingsBtn
+    LabEditorRingMode := LabEditorRingMode = "all" ? "selected" : (LabEditorRingMode = "selected" ? "off" : "all")
+    if IsObject(LabEditorRingsBtn)
+        LabEditorRingsBtn.Text := StrategyEditorRingButtonText()
+    StrategyEditorApplyLayer()
+    label := LabEditorRingMode = "all" ? "all tower footprints" : (LabEditorRingMode = "selected" ? "selected tower footprint" : "tower footprint rings hidden")
+    StrategyEditorSetStatus("Placement guides: " label ".")
+}
+
 StrategyEditorBuildMarkers() {
     global LabEditorDoc, LabEditorMarkerCtrls, LabEditorMarkerByHwnd, MainGui
 
     StrategyEditorClearMarkers()
     LabEditorMarkerCtrls := []
     LabEditorMarkerByHwnd := Map()
+    ringPath := StrategyEditorRingImagePath()
 
     colors := ["B04747", "476FB0", "4A8F59", "9C6CB0", "B08A47"]
     for index, placement in LabEditorDoc.Placements {
         point := StrategyEditorPlacementPoint(placement)
         slotNum := IsNumber(placement.slot) ? Integer(placement.slot) : 1
         color := colors[Max(1, Min(colors.Length, slotNum))]
+        ring := ""
+        if (ringPath != "") {
+            diameter := StrategyEditorFootprintDiameter(placement)
+            ring := MainGui.Add("Picture", "x" (point.x - Floor(diameter / 2)) " y" (point.y - Floor(diameter / 2))
+                " w" diameter " h" diameter " Hidden Disabled BackgroundTrans", ringPath)
+        }
         marker := MainGui.Add("Text", "x" (point.x - 9) " y" (point.y - 9)
-            " w18 h18 Hidden Center +Border Background" color " cFFFFFF", StrategyEditorMarkerLabel(placement))
+            " w18 h18 Hidden Center Background" color " cFFFFFF", StrategyEditorMarkerLabel(placement))
         marker.SetFont("s7 w700", "Segoe UI")
+        StrategyEditorSetCircularRegion(marker, 18)
         marker.OnEvent("Click", StrategyEditorMarkerClicked.Bind(index))
-        entry := {ctrl: marker, placement: placement, index: index, color: color}
+        entry := {ctrl: marker, ring: ring, placement: placement, index: index, color: color}
         LabEditorMarkerCtrls.Push(entry)
         LabEditorMarkerByHwnd[marker.Hwnd] := entry
     }
+
+    ; Rings are created before/among markers. Raise all marker HWNDs once so labels
+    ; always remain readable even where multiple footprint guides overlap.
+    for entry in LabEditorMarkerCtrls {
+        try DllCall("user32\SetWindowPos", "Ptr", entry.ctrl.Hwnd, "Ptr", 0,
+            "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UInt", 0x13)
+    }
+
     StrategyEditorRefreshLayerList()
     StrategyEditorRefreshMarkerSelection()
     StrategyEditorApplyLayer()
@@ -81,6 +205,10 @@ StrategyEditorBuildMarkers() {
 StrategyEditorClearMarkers() {
     global LabEditorMarkerCtrls, LabEditorMarkerByHwnd, LabEditorListRowMap
     for entry in LabEditorMarkerCtrls {
+        if IsObject(entry.ring) {
+            try entry.ring.Visible := false
+            try DllCall("DestroyWindow", "Ptr", entry.ring.Hwnd)
+        }
         try entry.ctrl.Visible := false
         try DllCall("DestroyWindow", "Ptr", entry.ctrl.Hwnd)
     }
@@ -95,7 +223,12 @@ StrategyEditorRefreshMarkerSelection() {
         point := StrategyEditorPlacementPoint(entry.placement)
         size := index = LabEditorSelectedRow ? 22 : 18
         entry.ctrl.Move(point.x - Floor(size / 2), point.y - Floor(size / 2), size, size)
+        StrategyEditorSetCircularRegion(entry.ctrl, size)
         entry.ctrl.SetFont(index = LabEditorSelectedRow ? "s8 w700" : "s7 w700", "Segoe UI")
+        if IsObject(entry.ring) {
+            diameter := StrategyEditorFootprintDiameter(entry.placement)
+            entry.ring.Move(point.x - Floor(diameter / 2), point.y - Floor(diameter / 2), diameter, diameter)
+        }
     }
 }
 
@@ -159,7 +292,10 @@ StrategyEditorApplyLayer() {
     global LabEditorMarkerCtrls, CurrentTab
     for entry in LabEditorMarkerCtrls {
         point := StrategyEditorPlacementPoint(entry.placement)
-        entry.ctrl.Visible := (CurrentTab = "Tab7") && point.visible && StrategyEditorPlacementVisible(entry.placement)
+        showPlacement := (CurrentTab = "Tab7") && point.visible && StrategyEditorPlacementVisible(entry.placement)
+        entry.ctrl.Visible := showPlacement
+        if IsObject(entry.ring)
+            entry.ring.Visible := showPlacement && StrategyEditorRingModeAllows(entry.index)
     }
 }
 
@@ -223,6 +359,7 @@ StrategyEditorSelectPlacement(row) {
     LabEditorYCtrl.Text := placement.y
     StrategyEditorShowTower(placement)
     StrategyEditorRefreshMarkerSelection()
+    StrategyEditorApplyLayer()
     visibleRow := StrategyEditorVisibleListRow(row)
     if visibleRow > 0
         try LabEditorList.Modify(visibleRow, "Vis Select Focus")
@@ -287,7 +424,7 @@ StrategyEditorFindPlacementRow(placement) {
 }
 
 StrategyEditorMouseMove(wParam, lParam, msg, hwnd) {
-    global LabEditorDoc, LabEditorDragPlacement, LabEditorDragMarker
+    global LabEditorDoc, LabEditorDragPlacement, LabEditorDragMarker, LabEditorDragRing
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
     global LabEditorDragLastFrame, LabEditorDragLastStatus, LabEditorDragPreviewX, LabEditorDragPreviewY
     global LabEditorXCtrl, LabEditorYCtrl
@@ -308,6 +445,11 @@ StrategyEditorMouseMove(wParam, lParam, msg, hwnd) {
     LabEditorDragPreviewY := logical.y
 
     LabEditorDragMarker.Move(mx - 11, my - 11, 22, 22)
+    StrategyEditorSetCircularRegion(LabEditorDragMarker, 22)
+    if IsObject(LabEditorDragRing) {
+        diameter := StrategyEditorFootprintDiameter(LabEditorDragPlacement)
+        LabEditorDragRing.Move(mx - Floor(diameter / 2), my - Floor(diameter / 2), diameter, diameter)
+    }
 
     if (!LabEditorDragLastStatus || now - LabEditorDragLastStatus >= 75) {
         LabEditorDragLastStatus := now
@@ -319,7 +461,7 @@ StrategyEditorMouseMove(wParam, lParam, msg, hwnd) {
 }
 
 StrategyEditorMouseUp(wParam, lParam, msg, hwnd) {
-    global LabEditorDoc, LabEditorDragPlacement, LabEditorDragMarker
+    global LabEditorDoc, LabEditorDragPlacement, LabEditorDragMarker, LabEditorDragRing
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
     global LabEditorDragLastFrame, LabEditorDragLastStatus, LabEditorDragPreviewX, LabEditorDragPreviewY
 
@@ -338,6 +480,7 @@ StrategyEditorMouseUp(wParam, lParam, msg, hwnd) {
     try DllCall("ReleaseCapture")
     LabEditorDragPlacement := ""
     LabEditorDragMarker := ""
+    LabEditorDragRing := ""
     LabEditorDragLastFrame := 0
     LabEditorDragLastStatus := 0
     LabEditorDragPreviewX := ""
