@@ -93,16 +93,16 @@ jobs:
           if (!$exe) { throw 'AutoHotkey64.exe not found in release archive.' }
           "AHK_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Parse Strategy Lab against upstream function signatures
+      - name: Validate Strategy Lab against upstream function signatures
         shell: pwsh
         run: |
-          # AutoHotkey64.exe is a Windows GUI-subsystem executable. PowerShell's call
-          # operator does not reliably wait for it or populate LASTEXITCODE, so drive
-          # it through System.Diagnostics.Process and capture /ErrorStdOut explicitly.
+          # /Validate is the AutoHotkey v2 load-only mode. It parses the harness and all
+          # Strategy Lab #Includes, validates known function arity, and exits without
+          # executing timers, GUI code, filesystem writes or automation.
           $script = (Resolve-Path 'tests/ahk_contract_harness.ahk').Path
           $psi = New-Object Diagnostics.ProcessStartInfo
           $psi.FileName = $env:AHK_EXE
-          $psi.Arguments = '/ErrorStdOut "' + $script + '"'
+          $psi.Arguments = '/Validate /ErrorStdOut=UTF-8 "' + $script + '"'
           $psi.WorkingDirectory = (Get-Location).Path
           $psi.UseShellExecute = $false
           $psi.CreateNoWindow = $true
@@ -111,16 +111,18 @@ jobs:
 
           $proc = New-Object Diagnostics.Process
           $proc.StartInfo = $psi
-          if (!$proc.Start()) { throw 'Could not launch AutoHotkey parser.' }
+          if (!$proc.Start()) { throw 'Could not launch AutoHotkey validator.' }
+          $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+          $stderrTask = $proc.StandardError.ReadToEndAsync()
           if (!$proc.WaitForExit(30000)) {
             try { $proc.Kill() } catch {}
-            throw 'AutoHotkey parser timed out after 30 seconds.'
+            throw 'AutoHotkey /Validate timed out after 30 seconds.'
           }
 
-          $stdout = $proc.StandardOutput.ReadToEnd()
-          $stderr = $proc.StandardError.ReadToEnd()
+          $stdout = $stdoutTask.GetAwaiter().GetResult()
+          $stderr = $stderrTask.GetAwaiter().GetResult()
           if ($stdout) { Write-Host $stdout }
           if ($stderr) { Write-Host $stderr }
           if ($proc.ExitCode -ne 0 -or (($stdout + $stderr) -match '(?im)^Error:')) {
-            throw "AutoHotkey parser failed with exit code $($proc.ExitCode)."
+            throw "AutoHotkey /Validate failed with exit code $($proc.ExitCode)."
           }
