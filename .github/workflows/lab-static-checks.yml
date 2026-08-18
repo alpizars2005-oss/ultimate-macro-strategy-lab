@@ -43,6 +43,7 @@ jobs:
 
           mapping = root / 'channel/stable/files.map'
           targets = set()
+          source_for = {}
           for raw in mapping.read_text(encoding='utf-8').splitlines():
               line = raw.strip()
               if not line or line.startswith('#'):
@@ -50,6 +51,7 @@ jobs:
               target, source, mode = [x.strip() for x in line.split('|')]
               assert target not in targets, f'duplicate target: {target}'
               targets.add(target)
+              source_for[target] = source
               assert (root / source).is_file(), f'missing stable source: {source}'
               assert mode in {'raw', 'base64'}, f'bad mode: {mode}'
 
@@ -64,12 +66,22 @@ jobs:
               'submacros/lab_assets.ps1',
           }
           assert required <= targets, f'missing update targets: {sorted(required - targets)}'
+          assert source_for['submacros/lab_assets.ps1'].endswith('submacros__lab_assets_v3.ps1')
+
+          placements = (root / source_for['lib/StrategyLab/StrategyEditorPlacements.ahk']).read_text(encoding='utf-8-sig')
+          assert 'LabEditorLayerOptions' in placements
+          assert 'LabEditorListRowMap' in placements
+          assert 'StrategyEditorRefreshLayerList' in placements
+
+          workspace = (root / source_for['lib/StrategyLab/StrategyEditorWorkspace.ahk']).read_text(encoding='utf-8-sig')
+          assert 'LabEditorHeaderLine.Move(20, 137, 960, 1)' in workspace
+          assert 'LabEditorWorkspaceCanvasW := 646' in workspace
 
       - name: Parse PowerShell helpers
         shell: pwsh
         run: |
           $files = @(
-            'channel/stable/files/submacros__lab_assets_v2.ps1',
+            'channel/stable/files/submacros__lab_assets_v3.ps1',
             'channel/stable/files/submacros__lab_update.ps1'
           )
           foreach ($file in $files) {
