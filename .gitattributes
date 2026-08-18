@@ -1,0 +1,5 @@
+# Update-channel payloads are integrity-checked byte-for-byte.
+# Never let Git for Windows rewrite LF/CRLF or otherwise apply text filters.
+/channel/stable/files/** -text
+/channel/stable/files.manifest -text
+/channel/stable/version.ini -text
