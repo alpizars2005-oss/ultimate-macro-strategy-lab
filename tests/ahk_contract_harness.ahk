@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
+; CI verification trigger after fixing GUI-subsystem process waiting.
 ; Minimal upstream contract stubs. The harness exits before any included module executes,
 ; but AutoHotkey still parses the complete script and validates calls against known
 ; signatures. This catches the exact classes that escaped Python-only checks before:
