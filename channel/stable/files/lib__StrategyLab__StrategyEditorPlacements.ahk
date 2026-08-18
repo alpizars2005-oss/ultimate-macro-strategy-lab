@@ -4,9 +4,11 @@ global LabEditorDragLastFrame := 0
 global LabEditorDragLastStatus := 0
 global LabEditorDragPreviewX := ""
 global LabEditorDragPreviewY := ""
+global LabEditorLayerOptions := ["All placements"]
+global LabEditorListRowMap := []
 
 StrategyEditorBuildLayers() {
-    global LabEditorDoc, LabEditorLayerCtrl, LabEditorLayer
+    global LabEditorDoc, LabEditorLayerCtrl, LabEditorLayer, LabEditorLayerOptions
     options := ["All placements"]
     seen := Map()
     for placement in LabEditorDoc.Placements {
@@ -19,10 +21,22 @@ StrategyEditorBuildLayers() {
             options.Push(label)
         }
     }
+
+    ; Preserve a user's active filter if this list is rebuilt after an async refresh.
+    wanted := LabEditorLayer
+    wantedIndex := 1
+    for index, option in options {
+        if (option = wanted) {
+            wantedIndex := index
+            break
+        }
+    }
+
+    LabEditorLayerOptions := options
     LabEditorLayerCtrl.Delete()
     LabEditorLayerCtrl.Add(options)
-    LabEditorLayerCtrl.Choose(1)
-    LabEditorLayer := "All placements"
+    LabEditorLayerCtrl.Choose(wantedIndex)
+    LabEditorLayer := options[wantedIndex]
 }
 
 StrategyEditorMarkerLabel(placement) {
@@ -41,17 +55,14 @@ StrategyEditorMarkerClicked(index, *) {
 }
 
 StrategyEditorBuildMarkers() {
-    global LabEditorDoc, LabEditorList, LabEditorMarkerCtrls, LabEditorMarkerByHwnd, MainGui
+    global LabEditorDoc, LabEditorMarkerCtrls, LabEditorMarkerByHwnd, MainGui
 
     StrategyEditorClearMarkers()
-    LabEditorList.Delete()
     LabEditorMarkerCtrls := []
     LabEditorMarkerByHwnd := Map()
 
     colors := ["B04747", "476FB0", "4A8F59", "9C6CB0", "B08A47"]
     for index, placement in LabEditorDoc.Placements {
-        LabEditorList.Add(, index, LabTowerPlacementDisplay(LabEditorDoc, placement), placement.x, placement.y)
-
         point := StrategyEditorPlacementPoint(placement)
         slotNum := IsNumber(placement.slot) ? Integer(placement.slot) : 1
         color := colors[Max(1, Min(colors.Length, slotNum))]
@@ -63,18 +74,20 @@ StrategyEditorBuildMarkers() {
         LabEditorMarkerCtrls.Push(entry)
         LabEditorMarkerByHwnd[marker.Hwnd] := entry
     }
+    StrategyEditorRefreshLayerList()
     StrategyEditorRefreshMarkerSelection()
     StrategyEditorApplyLayer()
 }
 
 StrategyEditorClearMarkers() {
-    global LabEditorMarkerCtrls, LabEditorMarkerByHwnd
+    global LabEditorMarkerCtrls, LabEditorMarkerByHwnd, LabEditorListRowMap
     for entry in LabEditorMarkerCtrls {
         try entry.ctrl.Visible := false
         try DllCall("DestroyWindow", "Ptr", entry.ctrl.Hwnd)
     }
     LabEditorMarkerCtrls := []
     LabEditorMarkerByHwnd := Map()
+    LabEditorListRowMap := []
 }
 
 StrategyEditorRefreshMarkerSelection() {
@@ -87,29 +100,50 @@ StrategyEditorRefreshMarkerSelection() {
     }
 }
 
-; Fast path for pan/zoom/layout changes. It deliberately avoids rebuilding the
-; native ListView, which is one of the most expensive operations in the editor.
 StrategyEditorRefreshMarkerLayout() {
     StrategyEditorRefreshMarkerSelection()
     StrategyEditorApplyLayer()
 }
 
-StrategyEditorRefreshVisuals(rebuildList := true) {
-    global LabEditorDoc, LabEditorList, LabEditorMarkerCtrls
+StrategyEditorRefreshLayerList(selectDocIndex := 0) {
+    global LabEditorDoc, LabEditorList, LabEditorListRowMap, LabEditorSelectedRow
     if !IsObject(LabEditorDoc)
         return
 
-    if rebuildList {
-        LabEditorList.Delete()
-        for index, placement in LabEditorDoc.Placements {
-            LabEditorList.Add(, index, LabTowerPlacementDisplay(LabEditorDoc, placement), placement.x, placement.y)
-            if (index > LabEditorMarkerCtrls.Length)
-                continue
-            entry := LabEditorMarkerCtrls[index]
-            entry.placement := placement
-            entry.index := index
-        }
+    if (selectDocIndex <= 0)
+        selectDocIndex := LabEditorSelectedRow
+
+    LabEditorList.Delete()
+    LabEditorListRowMap := []
+    visibleRow := 0
+
+    for index, placement in LabEditorDoc.Placements {
+        if !StrategyEditorPlacementVisible(placement)
+            continue
+        LabEditorList.Add(, index, LabTowerPlacementDisplay(LabEditorDoc, placement), placement.x, placement.y)
+        LabEditorListRowMap.Push(index)
+        if (index = selectDocIndex)
+            visibleRow := LabEditorListRowMap.Length
     }
+
+    if (visibleRow > 0)
+        try LabEditorList.Modify(visibleRow, "Vis Select Focus")
+}
+
+StrategyEditorRefreshVisuals(rebuildList := true) {
+    global LabEditorDoc, LabEditorMarkerCtrls
+    if !IsObject(LabEditorDoc)
+        return
+
+    for index, placement in LabEditorDoc.Placements {
+        if (index > LabEditorMarkerCtrls.Length)
+            continue
+        entry := LabEditorMarkerCtrls[index]
+        entry.placement := placement
+        entry.index := index
+    }
+    if rebuildList
+        StrategyEditorRefreshLayerList()
     StrategyEditorRefreshMarkerLayout()
 }
 
@@ -131,14 +165,52 @@ StrategyEditorApplyLayer() {
 }
 
 StrategyEditorLayerChanged(*) {
-    global LabEditorLayerCtrl, LabEditorLayer
-    LabEditorLayer := LabEditorLayerCtrl.Text
-    StrategyEditorApplyLayer()
+    global LabEditorLayerCtrl, LabEditorLayer, LabEditorLayerOptions, LabEditorDoc, LabEditorSelectedRow
+    if !IsObject(LabEditorDoc)
+        return
+
+    choice := LabEditorLayerCtrl.Value
+    if (choice < 1 || choice > LabEditorLayerOptions.Length)
+        choice := 1
+    LabEditorLayer := LabEditorLayerOptions[choice]
+
+    firstVisible := 0
+    selectedStillVisible := false
+    for index, placement in LabEditorDoc.Placements {
+        if !StrategyEditorPlacementVisible(placement)
+            continue
+        if !firstVisible
+            firstVisible := index
+        if (index = LabEditorSelectedRow)
+            selectedStillVisible := true
+    }
+
+    if !selectedStillVisible && firstVisible
+        LabEditorSelectedRow := firstVisible
+
+    StrategyEditorRefreshLayerList(LabEditorSelectedRow)
+    StrategyEditorRefreshMarkerLayout()
+    if LabEditorSelectedRow > 0
+        StrategyEditorSelectPlacement(LabEditorSelectedRow)
+
+    count := LabEditorListRowMap.Length
+    StrategyEditorSetStatus("Layer: " LabEditorLayer " • " count " placement" (count = 1 ? "" : "s") ".")
 }
 
 StrategyEditorRowSelected(ctrl, row, selected) {
-    if selected
-        StrategyEditorSelectPlacement(row)
+    global LabEditorListRowMap
+    if !selected || row < 1 || row > LabEditorListRowMap.Length
+        return
+    StrategyEditorSelectPlacement(LabEditorListRowMap[row])
+}
+
+StrategyEditorVisibleListRow(docIndex) {
+    global LabEditorListRowMap
+    for row, mappedIndex in LabEditorListRowMap {
+        if (mappedIndex = docIndex)
+            return row
+    }
+    return 0
 }
 
 StrategyEditorSelectPlacement(row) {
@@ -151,7 +223,9 @@ StrategyEditorSelectPlacement(row) {
     LabEditorYCtrl.Text := placement.y
     StrategyEditorShowTower(placement)
     StrategyEditorRefreshMarkerSelection()
-    try LabEditorList.Modify(row, "Vis Select Focus")
+    visibleRow := StrategyEditorVisibleListRow(row)
+    if visibleRow > 0
+        try LabEditorList.Modify(visibleRow, "Vis Select Focus")
 }
 
 StrategyEditorApplyCoordinates(*) {
@@ -221,9 +295,6 @@ StrategyEditorMouseMove(wParam, lParam, msg, hwnd) {
     if !IsObject(LabEditorDoc) || !IsObject(LabEditorDragPlacement) || !IsObject(LabEditorDragMarker)
         return
 
-    ; Coalesce the very noisy WM_MOUSEMOVE stream to about 60 FPS. Windows can
-    ; otherwise deliver hundreds of move messages per second and make AHK repaint
-    ; text/status controls far more often than the monitor can display.
     now := A_TickCount
     if (LabEditorDragLastFrame && now - LabEditorDragLastFrame < 16)
         return 0
@@ -236,11 +307,8 @@ StrategyEditorMouseMove(wParam, lParam, msg, hwnd) {
     LabEditorDragPreviewX := logical.x
     LabEditorDragPreviewY := logical.y
 
-    ; Moving one tiny marker is cheap; rebuilding the placement list is not.
     LabEditorDragMarker.Move(mx - 11, my - 11, 22, 22)
 
-    ; Coordinate/status text updates are intentionally slower than marker motion.
-    ; This keeps dragging visually attached to the cursor while still giving live feedback.
     if (!LabEditorDragLastStatus || now - LabEditorDragLastStatus >= 75) {
         LabEditorDragLastStatus := now
         try LabEditorXCtrl.Text := LabEditorDragPreviewX
@@ -258,7 +326,6 @@ StrategyEditorMouseUp(wParam, lParam, msg, hwnd) {
     if !IsObject(LabEditorDoc) || !IsObject(LabEditorDragPlacement) || !IsObject(LabEditorDragMarker)
         return
 
-    ; Always sample the final cursor position rather than trusting the last throttled frame.
     StrategyEditorGetClientCursor(&mx, &my)
     mx := Max(LabEditorCanvasX, Min(LabEditorCanvasX + LabEditorCanvasW, mx))
     my := Max(LabEditorCanvasY, Min(LabEditorCanvasY + LabEditorCanvasH, my))
