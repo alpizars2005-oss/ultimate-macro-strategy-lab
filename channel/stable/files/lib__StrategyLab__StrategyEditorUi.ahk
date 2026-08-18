@@ -8,7 +8,7 @@ StrategyEditorCreateTab(gui) {
     global LabEditorList, LabEditorXCtrl, LabEditorYCtrl, LabEditorApplyBtn, LabEditorSaveBtn
     global LabEditorOverwriteBtn, LabEditorStatus, LabEditorDirty
     global LabEditorZoomOutBtn, LabEditorZoomLabel, LabEditorZoomInBtn, LabEditorFitBtn, LabEditorExpandBtn
-    global LabEditorPanLeftBtn, LabEditorPanUpBtn, LabEditorPanDownBtn, LabEditorPanRightBtn, LabEditorSyncBtn, LabEditorRingsBtn
+    global LabEditorPanLeftBtn, LabEditorPanUpBtn, LabEditorPanDownBtn, LabEditorPanRightBtn, LabEditorSyncBtn, LabEditorRingsBtn, LabEditorRemoteBtn
     global LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorMapLabel, LabEditorCoordLabel, LabEditorDirtyLabel
     global LabEditorAssetBadge, LabEditorInfoPanel, LabEditorCanvasHint
     global LabEditorTitle, LabEditorSubtitle, LabEditorHeaderLine, LabEditorLayerLabel
@@ -47,8 +47,9 @@ StrategyEditorCreateTab(gui) {
     LabEditorPanRightBtn := gui.Add("Button", "x322 y177 w28 h24 Hidden", "→")
     LabEditorSyncBtn := gui.Add("Button", "x356 y177 w86 h24 Hidden", "Sync Assets")
     LabEditorRingsBtn := gui.Add("Button", "x446 y177 w82 h24 Hidden", "Rings: All")
+    LabEditorRemoteBtn := gui.Add("Button", "x532 y177 w64 h24 Hidden", "Remote")
     gui.SetFont("s7 w500 cA8A8A8", "Segoe UI")
-    LabEditorMapLabel := gui.Add("Text", "x532 y181 w138 h18 Hidden Right", "Map: -")
+    LabEditorMapLabel := gui.Add("Text", "x600 y181 w70 h18 Hidden Right", "Map: -")
 
     ; Canvas
     LabEditorCanvasBg := gui.Add("Text", "x" LabEditorCanvasX " y" LabEditorCanvasY
@@ -109,6 +110,7 @@ StrategyEditorCreateTab(gui) {
     LabEditorExpandBtn.OnEvent("Click", StrategyEditorToggleExpanded)
     LabEditorSyncBtn.OnEvent("Click", StrategyEditorSyncAssets)
     LabEditorRingsBtn.OnEvent("Click", StrategyEditorToggleRings)
+    LabEditorRemoteBtn.OnEvent("Click", LabRemoteLaunchSettings)
     LabEditorLayerCtrl.OnEvent("Change", StrategyEditorLayerChanged)
     LabEditorList.OnEvent("ItemSelect", StrategyEditorRowSelected)
     LabEditorApplyBtn.OnEvent("Click", StrategyEditorApplyCoordinates)
@@ -120,7 +122,7 @@ StrategyEditorCreateTab(gui) {
         LabEditorOpenBtn, LabEditorCurrentBtn, LabEditorSnapshotBtn, LabEditorCaptureBtn,
         LabEditorUndoBtn, LabEditorRedoBtn, LabEditorZoomOutBtn, LabEditorZoomLabel, LabEditorZoomInBtn,
         LabEditorFitBtn, LabEditorExpandBtn, LabEditorLayerLabel, LabEditorLayerCtrl, LabEditorPanLeftBtn, LabEditorPanUpBtn,
-        LabEditorPanDownBtn, LabEditorPanRightBtn, LabEditorSyncBtn, LabEditorRingsBtn, LabEditorMapLabel,
+        LabEditorPanDownBtn, LabEditorPanRightBtn, LabEditorSyncBtn, LabEditorRingsBtn, LabEditorRemoteBtn, LabEditorMapLabel,
         LabEditorCanvasBg, LabEditorSnapshot, LabEditorCanvasHint, LabEditorInfoPanel,
         LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList,
         LabEditorCoordLabel, LabEditorDirtyLabel, LabEditorXCtrl, LabEditorYCtrl, LabEditorApplyBtn, LabEditorSaveBtn,
@@ -195,6 +197,7 @@ StrategyEditorUseCurrent(*) {
 StrategyEditorLoadPath(path) {
     global LabEditorDoc, LabEditorLayer, LabEditorSelectedRow, LabEditorAssetsRequested
     try {
+        validation := LabStrategyValidate(path)
         LabEditorDoc := LabStratDocument(path)
         if (LabEditorDoc.Placements.Length = 0)
             throw Error("No SpawnTower placements were found in [Steps].")
