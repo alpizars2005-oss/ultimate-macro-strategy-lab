@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
+; CI smoke trigger for Strategy Lab 0.3.5 reliability verification.
 ; Minimal upstream contract stubs. The harness exits before any included module executes,
 ; but AutoHotkey still parses the complete script and validates calls against known
 ; signatures. This catches the exact classes that escaped Python-only checks before:
