@@ -1,0 +1,82 @@
+name: Strategy Lab checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'channel/stable/files/**'
+      - 'channel/stable/files.map'
+      - 'tests/**'
+      - '.github/workflows/lab-static-checks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Python tests
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest -q
+
+      - name: Stable channel sanity checks
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+          stable = root / 'channel/stable/files'
+          ahk_files = list(stable.glob('*.ahk')) + list(stable.glob('lib__StrategyLab__*.ahk'))
+          joined = '\n'.join(p.read_text(encoding='utf-8-sig') for p in ahk_files)
+
+          assert 'A_LocalAppData' not in joined, 'A_LocalAppData is not an AHK v2 built-in'
+          assert not re.search(r'(?m)^\s*local\s*:=', joined), 'reserved word local used as a variable'
+
+          mapping = root / 'channel/stable/files.map'
+          targets = set()
+          for raw in mapping.read_text(encoding='utf-8').splitlines():
+              line = raw.strip()
+              if not line or line.startswith('#'):
+                  continue
+              target, source, mode = [x.strip() for x in line.split('|')]
+              assert target not in targets, f'duplicate target: {target}'
+              targets.add(target)
+              assert (root / source).is_file(), f'missing stable source: {source}'
+              assert mode in {'raw', 'base64'}, f'bad mode: {mode}'
+
+          required = {
+              'lib/StrategyLab/StrategyEditorTab.ahk',
+              'lib/StrategyLab/StrategyEditorUi.ahk',
+              'lib/StrategyLab/StrategyEditorPlacements.ahk',
+              'lib/StrategyLab/StrategyEditorMaps.ahk',
+              'lib/StrategyLab/MapLibrary.ahk',
+              'lib/StrategyLab/TowerCatalog.ahk',
+              'submacros/lab_assets.ps1',
+          }
+          assert required <= targets, f'missing update targets: {sorted(required - targets)}'
+
+      - name: Parse PowerShell helpers
+        shell: pwsh
+        run: |
+          $files = @(
+            'channel/stable/files/submacros__lab_assets.ps1',
+            'channel/stable/files/submacros__lab_update.ps1'
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              exit 1
+            }
+          }
