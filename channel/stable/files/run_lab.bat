@@ -3,13 +3,25 @@ setlocal
 cd /d "%~dp0"
 
 if exist "submacros\lab_preflight.ps1" (
-  rem %~dp0 ends with a backslash. After cd /d, %CD% is the same directory
-  rem without the trailing-slash quoting ambiguity that older launchers hit.
   powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "submacros\lab_preflight.ps1" -InstallDir "%CD%"
   if errorlevel 1 (
     echo.
     echo Strategy Lab preflight detected a problem it could not safely repair.
     echo See %%APPDATA%%\Ultimate_Macro\StrategyEditor\preflight.log for details.
+    pause
+    exit /b 1
+  )
+)
+
+rem The watchdog is a separate AutoHotkey process and therefore cannot inherit Lab
+rem includes from Main_Lab. Patch its three existing Triumph/Loss branches once, with
+rem backups and exact anchor-count verification, before the normal syntax probe.
+if exist "submacros\lab_watchdog_patch.ps1" (
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "submacros\lab_watchdog_patch.ps1" -InstallDir "%CD%"
+  if errorlevel 1 (
+    echo.
+    echo Strategy Lab could not safely install its watchdog outcome-capture bridge.
+    echo See %%APPDATA%%\Ultimate_Macro\StrategyEditor\watchdog-patch.log for details.
     pause
     exit /b 1
   )
