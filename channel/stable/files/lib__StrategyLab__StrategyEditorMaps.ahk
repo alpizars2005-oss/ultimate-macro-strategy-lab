@@ -141,8 +141,46 @@ StrategyEditorPreviewPlacement(index, placement) {
     return {x: placement.x, y: placement.y}
 }
 
+; Pure geometry stage shared by rendering and CI runtime tests. This is the single
+; source of truth for layer filtering + coordinate projection.
+StrategyEditorCanvasPlacements() {
+    global LabEditorDoc, LabEditorViewport, LabEditorCanvasW, LabEditorCanvasH
+    result := []
+    if !IsObject(LabEditorDoc)
+        return result
+
+    for index, placement in LabEditorDoc.Placements {
+        if !StrategyEditorPlacementVisible(placement)
+            continue
+        logical := StrategyEditorPreviewPlacement(index, placement)
+        point := LabEditorViewport.StrategyToViewport(
+            logical.x, logical.y,
+            LabEditorDoc.StrategyWidth, LabEditorDoc.StrategyHeight,
+            LabEditorCanvasW, LabEditorCanvasH)
+        if !point.visible
+            continue
+        result.Push({index: index, placement: placement, point: point})
+    }
+    return result
+}
+
+StrategyEditorRebuildHitRegions(items) {
+    global LabEditorHitRegions, LabEditorCanvasX, LabEditorCanvasY
+    LabEditorHitRegions := []
+    for item in items {
+        markerRadius := StrategyEditorMarkerDiameter(item.index) / 2.0
+        LabEditorHitRegions.Push({
+            index: item.index,
+            x: item.point.x + LabEditorCanvasX,
+            y: item.point.y + LabEditorCanvasY,
+            radius: Max(12, markerRadius + 5)
+        })
+    }
+    return LabEditorHitRegions
+}
+
 StrategyEditorDrawPlacement(graphics, index, placement, point, fast := false) {
-    global LabEditorSelectedRow, LabEditorHitRegions
+    global LabEditorSelectedRow
 
     selected := index = LabEditorSelectedRow
     markerDiameter := StrategyEditorMarkerDiameter(index)
@@ -175,7 +213,6 @@ StrategyEditorDrawPlacement(graphics, index, placement, point, fast := false) {
         }
     }
 
-    ; Small center badge. It is painted into the frame, not a child control.
     markerBrush := 0
     outlinePen := 0
     try {
@@ -194,8 +231,6 @@ StrategyEditorDrawPlacement(graphics, index, placement, point, fast := false) {
             try Gdip_DeleteBrush(markerBrush)
     }
 
-    ; During continuous pan/drag, skipping most text keeps redraws smooth. The selected
-    ; marker stays labelled; the final settled frame restores every number immediately.
     if (!fast || selected) {
         label := StrategyEditorMarkerLabel(placement)
         size := selected ? 8 : 7
@@ -203,20 +238,12 @@ StrategyEditorDrawPlacement(graphics, index, placement, point, fast := false) {
             . " w" markerDiameter " h" markerDiameter " Center vCenter cFFFFFFFF s" size " Bold"
         try Gdip_TextToGraphics(graphics, label, options, "Segoe UI")
     }
-
-    LabEditorHitRegions.Push({
-        index: index,
-        x: point.x + LabEditorCanvasX,
-        y: point.y + LabEditorCanvasY,
-        radius: Max(12, markerRadius + 5)
-    })
 }
 
 StrategyEditorRenderCompositeFrame(outputPath) {
     global LabEditorSourceImage, LabEditorViewport, LabEditorCanvasW, LabEditorCanvasH
-    global LabEditorDoc, LabEditorHitRegions, LabEditorPanActive, LabEditorDragPlacement
+    global LabEditorPanActive, LabEditorDragPlacement
 
-    LabEditorHitRegions := []
     pSource := LabMapAcquireRenderBitmap(LabEditorSourceImage, &sourceW, &sourceH)
     if !pSource || sourceW <= 0 || sourceH <= 0
         return false
@@ -237,26 +264,17 @@ StrategyEditorRenderCompositeFrame(outputPath) {
         Gdip_DrawImage(graphics, pSource, 0, 0, LabEditorCanvasW, LabEditorCanvasH,
             rect.x, rect.y, rect.w, rect.h)
 
+        items := StrategyEditorCanvasPlacements()
+        StrategyEditorRebuildHitRegions(items)
+
         fast := false
         if IsSet(LabEditorPanActive)
             fast := !!LabEditorPanActive
         if IsObject(LabEditorDragPlacement)
             fast := true
 
-        if IsObject(LabEditorDoc) {
-            for index, placement in LabEditorDoc.Placements {
-                if !StrategyEditorPlacementVisible(placement)
-                    continue
-                logical := StrategyEditorPreviewPlacement(index, placement)
-                point := LabEditorViewport.StrategyToViewport(
-                    logical.x, logical.y,
-                    LabEditorDoc.StrategyWidth, LabEditorDoc.StrategyHeight,
-                    LabEditorCanvasW, LabEditorCanvasH)
-                if !point.visible
-                    continue
-                StrategyEditorDrawPlacement(graphics, index, placement, point, fast)
-            }
-        }
+        for item in items
+            StrategyEditorDrawPlacement(graphics, item.index, item.placement, item.point, fast)
 
         Gdip_SaveBitmapToFile(pOut, outputPath, 90)
         return FileExist(outputPath) && FileGetSize(outputPath) > 500
@@ -362,7 +380,6 @@ StrategyEditorPan(dx, dy) {
 }
 
 StrategyEditorMouseWheel(wParam, lParam, msg, hwnd) {
-    ; Legacy compatibility entry point. The 0.4 interaction module owns wheel routing.
     return StrategyEditorInteractiveWheel(wParam, lParam, msg, hwnd)
 }
 
@@ -397,8 +414,6 @@ StrategyEditorShowTower(placement) {
     if (towerName = "")
         towerName := "Slot " placement.slot
 
-    ; No website portrait. The selected-unit vanity badge uses the same label as the
-    ; in-map marker, keeping the Editor entirely local/screenshot based.
     if LabEditorControlAlive(LabEditorTowerPortrait) {
         try LabEditorTowerPortrait.Text := StrategyEditorMarkerLabel(placement)
         try LabEditorTowerPortrait.SetFont("s17 w700 cFFFFFF", "Segoe UI")
@@ -427,8 +442,6 @@ StrategyEditorMaybeAutoSyncAssets() {
     try LabEditorAssetBadge.Text := badgeText
 }
 
-; Kept under the old name because the UI/workspace already references LabEditorSyncBtn.
-; In 0.4 it never touches the network; it simply captures the exact Roblox camera.
 StrategyEditorSyncAssets(*) {
     StrategyEditorCaptureRoblox()
 }
