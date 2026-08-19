@@ -81,9 +81,9 @@ LabFootprintCollisionMap(document) {
 }
 
 LabFootprintMarkerDiameter(selected := false) {
-    ; The footprint itself is the authoritative placement guide. Keep the center marker
-    ; intentionally tiny so it never visually masquerades as the tower boundary.
-    return selected ? 7.0 : 5.0
+    ; Small footprint diameter is only ~5.5 px on the compact 438px canvas. Keep the
+    ; center dot smaller than that so the true reserved-space boundary remains visible.
+    return selected ? 4.0 : 3.0
 }
 
 LabFootprintLabelOffset(selected := false) {
