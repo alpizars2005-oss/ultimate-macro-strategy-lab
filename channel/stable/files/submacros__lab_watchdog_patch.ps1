@@ -4,8 +4,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 # Static-contract tokens for the canonical verification expressions below:
-# LabWatchdogCaptureOutcome\\(\"Triumph\"\\)
-# LabWatchdogCaptureOutcome\\(\"Loss\"\\)
+# LabWatchdogCaptureOutcome\\(\\"Triumph\\"\\)
+# LabWatchdogCaptureOutcome\\(\\"Loss\\"\\)
 $root = Join-Path $env:APPDATA 'Ultimate_Macro\StrategyEditor'
 $log = Join-Path $root 'watchdog-patch.log'
 New-Item -ItemType Directory -Force -Path $root | Out-Null
@@ -37,7 +37,6 @@ try {
         exit 0
     }
 
-    # Normalize previous/partial marked blocks before inserting the canonical hooks.
     $text = [regex]::Replace($text,'(?ms)^[ \t]*; <StrategyLabPostRunCapture[^>]*>[ \t]*\r?\n.*?^[ \t]*; </StrategyLabPostRunCapture>[ \t]*\r?\n?','')
 
     if (!$text.Contains($includeToken)) {
