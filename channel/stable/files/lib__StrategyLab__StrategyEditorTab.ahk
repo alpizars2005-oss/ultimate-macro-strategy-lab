@@ -14,6 +14,10 @@
 ; Integrated Strategy Editor tab for Main_Lab.ahk.
 ; Keep StrategyEditorCore above StrategyEditorUi: the UI constructs LabStratDocument
 ; at runtime and must never rely on a test harness or another include to provide it.
+;
+; AHK v2 throws before a helper can run if an unset global is passed as an argument.
+; Every GUI-control global used by early timers is therefore initialized before any
+; editor module that can schedule work is included.
 
 global LabEditorCtrls := []
 global LabEditorMarkerCtrls := []
@@ -32,7 +36,7 @@ global LabEditorExpanded := false
 global LabEditorCurrentMap := ""
 global LabEditorAssetSyncPid := 0
 global LabEditorAssetsRequested := false
-; Double-buffered JPEG viewport frames reduce disk traffic and stale Picture-control flashes.
+
 global LabEditorViewportPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport-a.jpg"
 global LabEditorViewportAltPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport-b.jpg"
 global LabEditorViewportFrame := 0
@@ -41,6 +45,51 @@ global LabEditorCanvasX := 20
 global LabEditorCanvasY := 205
 global LabEditorCanvasW := 438
 global LabEditorCanvasH := 238
+
+; Controls are assigned real Gui.Control objects by StrategyEditorCreateTab().
+; Empty-string sentinels make startup/teardown checks safe before that happens.
+global LabEditorOpenBtn := ""
+global LabEditorCurrentBtn := ""
+global LabEditorSnapshotBtn := ""
+global LabEditorCaptureBtn := ""
+global LabEditorUndoBtn := ""
+global LabEditorRedoBtn := ""
+global LabEditorLayerCtrl := ""
+global LabEditorCanvasBg := ""
+global LabEditorSnapshot := ""
+global LabEditorList := ""
+global LabEditorXCtrl := ""
+global LabEditorYCtrl := ""
+global LabEditorApplyBtn := ""
+global LabEditorSaveBtn := ""
+global LabEditorOverwriteBtn := ""
+global LabEditorStatus := ""
+global LabEditorDirty := ""
+global LabEditorZoomOutBtn := ""
+global LabEditorZoomLabel := ""
+global LabEditorZoomInBtn := ""
+global LabEditorFitBtn := ""
+global LabEditorExpandBtn := ""
+global LabEditorPanLeftBtn := ""
+global LabEditorPanUpBtn := ""
+global LabEditorPanDownBtn := ""
+global LabEditorPanRightBtn := ""
+global LabEditorSyncBtn := ""
+global LabEditorRingsBtn := ""
+global LabEditorRemoteBtn := ""
+global LabEditorTowerPortrait := ""
+global LabEditorTowerName := ""
+global LabEditorTowerMeta := ""
+global LabEditorMapLabel := ""
+global LabEditorCoordLabel := ""
+global LabEditorDirtyLabel := ""
+global LabEditorAssetBadge := ""
+global LabEditorInfoPanel := ""
+global LabEditorCanvasHint := ""
+global LabEditorTitle := ""
+global LabEditorSubtitle := ""
+global LabEditorHeaderLine := ""
+global LabEditorLayerLabel := ""
 
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorUi.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorPlacements.ahk"
