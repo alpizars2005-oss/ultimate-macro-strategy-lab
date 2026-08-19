@@ -23,10 +23,11 @@ StrategyEditorReleaseCanvasBitmap(*) {
             try old := DllCall("user32\SendMessageW", "Ptr", hwnd, "UInt", 0x0172,
                 "Ptr", 0, "Ptr", 0, "Ptr") ; STM_SETIMAGE / IMAGE_BITMAP
     }
-    if old
+    if old {
         try DllCall("gdi32\DeleteObject", "Ptr", old)
-    else
+    } else {
         try DllCall("gdi32\DeleteObject", "Ptr", current)
+    }
 }
 OnExit(StrategyEditorReleaseCanvasBitmap)
 
@@ -400,9 +401,11 @@ StrategyEditorRenderBackground(repositionMarkers := true) {
     pOut := StrategyEditorBuildCompositeBitmap()
     if pOut {
         hBitmap := 0
-        try hBitmap := StrategyEditorBitmapToHBITMAP(pOut)
-        finally
+        try {
+            hBitmap := StrategyEditorBitmapToHBITMAP(pOut)
+        } finally {
             try Gdip_DisposeImage(pOut)
+        }
 
         if hBitmap && StrategyEditorSwapCanvasBitmap(hBitmap) {
             try LabEditorSnapshot.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
@@ -512,7 +515,6 @@ StrategyEditorShowTower(placement) {
     if LabEditorControlAlive(LabEditorTowerName)
         try LabEditorTowerName.Text := LabTowerPlacementDisplay(LabEditorDoc, placement)
     if LabEditorControlAlive(LabEditorTowerMeta) {
-        footprint := LabTowerPlacementFootprint(towerName)
         try LabEditorTowerMeta.Text := LabTowerPlacementMeta(LabEditorDoc, placement)
             . "`nX " placement.x "  •  Y " placement.y
     }
