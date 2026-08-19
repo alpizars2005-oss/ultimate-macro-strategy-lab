@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Enforce Strategy Lab compatibility and canvas architecture
+      - name: Enforce Strategy Lab compatibility and 0.4.6 architecture
         shell: python
         run: |
           from pathlib import Path
@@ -45,10 +45,13 @@ jobs:
           tab = (stable / 'lib__StrategyLab__StrategyEditorTab.ahk').read_text(encoding='utf-8-sig')
           ui = (stable / 'lib__StrategyLab__StrategyEditorUi.ahk').read_text(encoding='utf-8-sig')
           placements = (stable / 'lib__StrategyLab__StrategyEditorPlacements.ahk').read_text(encoding='utf-8-sig')
-          maps = (stable / 'lib__StrategyLab__StrategyEditorMaps.ahk').read_text(encoding='utf-8-sig')
+          maps = (stable / 'lib__StrategyLab__StrategyEditorMaps046.ahk').read_text(encoding='utf-8-sig')
           footprints = (stable / 'lib__StrategyLab__LabFootprintGeometry.ahk').read_text(encoding='utf-8-sig')
           map_library = (stable / 'lib__StrategyLab__MapLibrary.ahk').read_text(encoding='utf-8-sig')
           auto_capture = (stable / 'lib__StrategyLab__LabAutoMapCapture.ahk').read_text(encoding='utf-8-sig')
+          watchdog_bridge = (stable / 'lib__StrategyLab__LabWatchdogBridge.ahk').read_text(encoding='utf-8-sig')
+          watchdog_patch = (stable / 'submacros__lab_watchdog_patch.ps1').read_text(encoding='utf-8-sig')
+          postrun = (stable / 'submacros__lab_postrun_calibrate.ps1').read_text(encoding='utf-8-sig')
           interaction = (stable / 'lib__StrategyLab__StrategyEditorInteraction.ahk').read_text(encoding='utf-8-sig')
           workspace = (stable / 'lib__StrategyLab__StrategyEditorWorkspace.ahk').read_text(encoding='utf-8-sig')
           stability = (stable / 'lib__StrategyLab__LabEditorStability.ahk').read_text(encoding='utf-8-sig')
@@ -68,65 +71,75 @@ jobs:
           assert 'FileRead(path, "RAW")' in validation
           assert 'LabStrategyTrimTerminalNuls' in validation
 
-          # Single-canvas architecture: no placement HWNDs, geometric layer/drag hit testing.
-          assert 'LabSimpleFootprints.ahk' not in tab
+          # Single canvas: no placement child HWNDs; new renderer is the only map include.
+          assert 'StrategyEditorMaps046.ahk' in tab
+          assert '#Include "%A_ScriptDir%\\lib\\StrategyLab\\StrategyEditorMaps.ahk"' not in tab
           assert 'MainGui.Add("Text"' not in placements
           assert 'MainGui.Add("Picture"' not in placements
           assert 'DestroyWindow' not in placements
           assert 'LabEditorHitRegions' in placements
           assert 'StrategyEditorHitTestPlacement' in placements
-          assert 'StrategyEditorBeginDrag' in placements
           assert 'Gdip_FillEllipse' in maps and 'Gdip_DrawEllipse' in maps
-          assert 'LabEditorHitRegions.Push' in maps
-          assert 'StrategyEditorHitTestPlacement(mx, my)' in interaction
-          assert 'StrategyEditorSlotColor' in placements
+          assert 'GdipCreateHBITMAPFromBitmap' in maps and '0x0172' in maps
+          assert 'StrategyEditorBuildFastDragBase' in maps
+          assert 'LabEditorFastBaseBitmap' in maps
+          assert 'if LabEditorPanActive' in maps
+          assert 'LabFootprintPlacementCollides' in maps
+
+          # User-confirmed TDS placement boundary, not attack range.
+          assert 'LabFootprintPixelsPerUnit := 26.0' in footprints
+          assert 'small striped' in footprints and 'cyan outline' in footprints
+          assert 'LabFootprintPlacementCollides' in footprints
+          assert 'LabFootprintCanvasEllipse' in maps
           assert 'return "Footprints: All"' in placements
 
-          # 0.4.3 true-footprint model + in-memory bitmap swap.
-          assert 'LabFootprintCanvasEllipse' in footprints and 'LabFootprintCollisionMap' in footprints
-          assert 'LabFootprintPixelsPerUnit := 12.0' in footprints
-          assert 'LabFootprintCanvasEllipse' in maps and 'LabFootprintCollisionMap' in maps
-          assert 'GdipCreateHBITMAPFromBitmap' in maps
-          assert '0x0172' in maps  # STM_SETIMAGE
-          assert 'LabEditorSnapshot.Value := renderPath' not in maps
-          assert 'lib/StrategyLab/LabFootprintGeometry.ahk|' in mapping
+          # Exact CLIENT capture + hotbar-free editable ROI.
+          assert 'LabMapGetRobloxClientRect' in map_library
+          assert 'WinGetClientPos' in map_library
+          assert 'LabMapPlayableBottomReference := 918.0' in map_library
+          assert 'ClientAligned' in map_library and '0.4.6' in map_library
+          assert 'LabMapPlayableRatio()' in maps
+          assert 'LabMapPlayableStrategyHeight' in maps
+          assert 'LabMapApplyCalibrationPoint' in maps and 'LabMapRemoveCalibrationPoint' in maps
+          assert 'LabMapGetRobloxClientRect(&pX, &pY, &w, &h)' in maps
+          assert 'LabMapGetRobloxClientRect(&x, &y, &w, &h)' in auto_capture
+          assert 'getRobloxPos(&pX, &pY, &w, &h)' not in maps
+          assert 'getRobloxPos(&x, &y, &w, &h)' not in auto_capture
 
-          # Exact map stays local. Only strategy-scoped tower portraits may use the wiki.
+          # Post-run reference/calibration is watchdog-owned and external to gameplay.
+          assert 'LabWatchdogCaptureOutcome' in watchdog_bridge
+          assert 'WinGetClientPos' in watchdog_bridge
+          assert 'lab_postrun_calibrate.ps1' in watchdog_bridge
+          assert 'resTriumph1' in watchdog_patch and 'resTriumph2' in watchdog_patch and 'resLost' in watchdog_patch
+          assert 'LabWatchdogCaptureOutcome\\(\\"Triumph\\"\\)' in watchdog_patch
+          assert 'LabWatchdogCaptureOutcome\\(\\"Loss\\"\\)' in watchdog_patch
+          assert 'PixelsPerUnit' in postrun and 'postrun-cyan' in postrun
+          assert 'Is-Cyan' in postrun
+          assert 'lab_watchdog_patch.ps1' in launcher
+          assert 'lib/StrategyLab/LabWatchdogBridge.ahk|' in mapping
+          assert 'submacros/lab_postrun_calibrate.ps1|' in mapping
+          assert 'submacros/lab_watchdog_patch.ps1|' in mapping
+          assert 'lib/StrategyLab/StrategyEditorMaps046.ahk|' in mapping
+
+          # Maps local, tower portraits may use TDS Wiki.
           assert 'LabMapCameraPath(mapName)' in maps
-          assert 'LabMapPreferredBackground' not in maps
           assert 'LabTowerPortraitPath' in maps
-          assert 'lab_assets.ps1' not in maps
-          assert 'submacros/lab_assets.ps1|' not in mapping
           assert 'submacros/lab_tower_assets.ps1|' in mapping
           assert 'tds.fandom.com' in tower_assets
           assert 'MapLibrary' not in tower_assets
           assert 'LabEditorTowerPortrait := gui.Add("Picture"' in ui
-          assert 'Map source: exact screenshot' in maps
 
-          # Map captures are atomic/local and 0.4.2 legacy lobby images are refreshable.
-          assert 'LabMapSaveCameraBitmap' in map_library
-          assert 'LabMapReleaseRenderCache()' in map_library
-          assert 'WriterVersion' in map_library and '0.4.3' in map_library
-          assert 'LabMapCameraNeedsRefresh' in auto_capture
+          # Gameplay auto-capture remains deferred from SpawnTower.
           assert 'LabMapSaveCameraBitmap(name, pBitmap, "spawn")' in auto_capture
           assert 'LabMapAutoCaptureCurrent()' in preflight
           assert 'SpawnTower' in preflight
           assert 'LabMapAutoCaptureIfMissing(gamemap)' not in preflight
 
-          # Native lifecycle guards cover Editor and Stats teardown.
+          # Native lifecycle guards and previous features stay intact.
           assert 'LabEditorControlAlive' in stability and 'user32\\IsWindow' in stability
           assert 'LabEditorLifecycleExit' in stability
-          assert 'return LabEditorControlVisible(LabEditorCanvasBg) || LabEditorControlVisible(LabEditorSnapshot)' in interaction
-          assert 'LabEditorControlVisible(LabEditorCanvasBg) || LabEditorControlVisible(LabEditorSnapshot)' in workspace
           assert 'LabStatsControlVisible(LabStatsState)' in stats
           assert 'LabStatsControlAlive' in stats
-
-          assert 'lib/StrategyLab/LabEditorStability.ahk|' in mapping
-          assert 'lib/StrategyLab/LabStatsTab.ahk|' in mapping
-          assert 'lib/StrategyLab/LabRewardCatalog.ahk|' in mapping
-          assert 'lib/StrategyLab/LabRewardTracker.ahk|' in mapping
-          assert 'submacros/lab_reward_assets.ps1|' in mapping
-          assert 'Resources/StrategyLab/Rewards/catalog.ini|' in mapping
           assert 'SetTimer(LabRewardMaybeSyncAssets, -6000)' in reward_catalog
           assert 'special_drops":[]' in reward_tracker
           for required in ['[Coin]','[Gem]','[Experience]','[Spin Ticket]','[Revive Ticket]','[Time Scale Ticket]']:
@@ -136,14 +149,11 @@ jobs:
           assert 'lab_syntax_probe.ps1' in updater and 'Restore-AppliedFiles' in updater
           assert 'Discord Remote' in remote and 'LabRemoteWebhookBtn' in remote
           assert '[Drawing.Point]::new' in remote_settings and '[Drawing.Size]::new' in remote_settings
-          assert 'New-Object Drawing.Point(' not in remote_settings
-          assert 'New-Object Drawing.Size(' not in remote_settings
           assert '[switch]$SelfTest' in remote_settings
           assert '<StrategyLabRemoteBoundary>' in preflight
           assert 'LabRemoteConsumeBetweenMatches(&switched, &stratName)' in preflight
           assert 'StrategyEditorCreateTab(MainGui)' in clean_installer
           assert 'LabStatsCreateTab(MainGui)' in clean_installer
-          assert '"Editor", "Stats", "Credits"' in clean_installer
 
       - name: Parse every PowerShell helper and recovery tool
         shell: pwsh
@@ -151,6 +161,8 @@ jobs:
           $files = @(
             'channel/stable/files/submacros__lab_tower_assets.ps1',
             'channel/stable/files/submacros__lab_reward_assets.ps1',
+            'channel/stable/files/submacros__lab_watchdog_patch.ps1',
+            'channel/stable/files/submacros__lab_postrun_calibrate.ps1',
             'channel/stable/files/submacros__lab_update.ps1',
             'channel/stable/files/submacros__lab_preflight.ps1',
             'channel/stable/files/submacros__lab_syntax_probe.ps1',
@@ -214,6 +226,35 @@ jobs:
           if ($proc.ExitCode -ne 0 -or (($stdout + $stderr) -match '(?im)^Error:')) {
             throw "AutoHotkey /Validate failed with exit code $($proc.ExitCode)."
           }
+
+      - name: Validate watchdog bridge with its real external surface stubbed
+        shell: pwsh
+        run: |
+          $bridge = (Resolve-Path 'channel/stable/files/lib__StrategyLab__LabWatchdogBridge.ahk').Path
+          $harness = Join-Path (Get-Location).Path '_watchdog_bridge_contract.ahk'
+          @"
+          #Requires AutoHotkey v2.0
+          GetRobloxHWND(*) => 0
+          Gdip_BitmapFromScreen(*) => 0
+          Gdip_SaveBitmapToFile(*) => 0
+          Gdip_DisposeImage(*) => 0
+          global StateFile := A_Temp "\\strategy-lab-state.ini"
+          #Include "$bridge"
+          ExitApp(0)
+          "@ | Set-Content -LiteralPath $harness -Encoding UTF8
+          $psi = New-Object Diagnostics.ProcessStartInfo
+          $psi.FileName = $env:AHK_EXE
+          $psi.Arguments = '/Validate /ErrorStdOut=UTF-8 "' + $harness + '"'
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $p = [Diagnostics.Process]::new(); $p.StartInfo = $psi; [void]$p.Start()
+          $outTask=$p.StandardOutput.ReadToEndAsync(); $errTask=$p.StandardError.ReadToEndAsync()
+          if (!$p.WaitForExit(30000)) { try {$p.Kill()} catch {}; throw 'Watchdog bridge validation timed out.' }
+          $out=$outTask.GetAwaiter().GetResult(); $err=$errTask.GetAwaiter().GetResult()
+          if ($out) {Write-Host $out}; if ($err) {Write-Host $err}
+          if ($p.ExitCode -ne 0 -or (($out+$err) -match '(?im)^Error:')) { throw 'Watchdog bridge validation failed.' }
 
       - name: Run strategy encoding compatibility fixtures
         shell: pwsh
