@@ -31,20 +31,15 @@ LabAutoMapStrategyRunning() {
 }
 
 ; Compatibility entry point injected by 0.4.3 preflight at SpawnTower entry. In 0.4.4
-; it is intentionally O(1): no WinActivate, no Hide/Show, no getRobloxPos and no GDI+.
+; it is intentionally constant-time: no disk lookup, no image decode, no WinActivate,
+; no Hide/Show, no getRobloxPos and no GDI+.
 LabMapAutoCaptureCurrent(*) {
     global gamemap, LabAutoMapCaptureScheduled, LabAutoMapCaptureRetry
 
     if !IsSet(gamemap)
         return ""
-    name := Trim(String(gamemap))
-    if (name = "")
+    if (Trim(String(gamemap)) = "")
         return ""
-
-    cached := LabMapCameraPath(name)
-    if (cached != "" && !LabMapCameraNeedsRefresh(name))
-        return cached
-
     if LabAutoMapCaptureScheduled
         return ""
 
