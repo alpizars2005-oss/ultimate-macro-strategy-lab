@@ -13,6 +13,30 @@ global LabStatsStrategy := ""
 global LabStatsReward := ""
 global LabStatsUpdated := ""
 
+LabStatsControlAlive(ctrl) {
+    if !IsObject(ctrl)
+        return false
+    hwnd := 0
+    try hwnd := ctrl.Hwnd
+    catch
+        return false
+    if !hwnd
+        return false
+    try return DllCall("user32\IsWindow", "Ptr", hwnd, "Int") != 0
+    catch
+        return false
+}
+
+LabStatsControlVisible(ctrl) {
+    if !LabStatsControlAlive(ctrl)
+        return false
+    visible := false
+    try visible := ctrl.Visible
+    catch
+        return false
+    return !!visible
+}
+
 LabStatsCreateTab(gui) {
     global LabStatsCtrls, LabStatsTitle, LabStatsSubtitle, LabStatsState, LabStatsWL
     global LabStatsCurrency, LabStatsStrategy, LabStatsReward, LabStatsUpdated
@@ -54,13 +78,17 @@ LabStatsCreateTab(gui) {
 
 LabStatsShow() {
     global LabStatsCtrls
-    for ctrl in LabStatsCtrls
-        ctrl.Visible := true
+    for ctrl in LabStatsCtrls {
+        if LabStatsControlAlive(ctrl)
+            try ctrl.Visible := true
+    }
     LabStatsRefresh()
 }
 
 LabStatsReadInt(key, fallback := 0) {
     global StateFile
+    if !IsSet(StateFile) || StateFile = "" || !FileExist(StateFile)
+        return Integer(fallback)
     value := fallback
     try value := IniRead(StateFile, "State", key, fallback)
     return IsNumber(value) ? Integer(value) : Integer(fallback)
@@ -78,7 +106,9 @@ LabStatsRefresh(*) {
     global StateFile, LabStatsState, LabStatsWL, LabStatsCurrency, LabStatsStrategy
     global LabStatsReward, LabStatsUpdated
 
-    if !IsObject(LabStatsState) || !LabStatsState.Visible
+    if !LabStatsControlVisible(LabStatsState)
+        return
+    if !IsSet(StateFile) || StateFile = "" || !FileExist(StateFile)
         return
 
     running := false
@@ -99,27 +129,41 @@ LabStatsRefresh(*) {
         strategy := IniRead(StateFile, "State", "Strategy", "")
     }
 
-    LabStatsState.Text := running ? "RUNNING" : "STOPPED"
+    if !LabStatsControlAlive(LabStatsState)
+        return
+
+    try LabStatsState.Text := running ? "RUNNING" : "STOPPED"
     total := wins + losses
     rate := total > 0 ? Round((wins / total) * 100, 1) : 0
-    LabStatsWL.Text := wins " W  •  " losses " L`n" rate "% winrate"
-    LabStatsCurrency.Text := coins " Coins  •  " gems " Gems`n" exp " EXP"
-    LabStatsStrategy.Text := LabStatsShortPath(strategy)
+    if LabStatsControlAlive(LabStatsWL)
+        try LabStatsWL.Text := wins " W  •  " losses " L`n" rate "% winrate"
+    if LabStatsControlAlive(LabStatsCurrency)
+        try LabStatsCurrency.Text := coins " Coins  •  " gems " Gems`n" exp " EXP"
+    if LabStatsControlAlive(LabStatsStrategy)
+        try LabStatsStrategy.Text := LabStatsShortPath(strategy)
 
-    rewardFile := A_AppData "\Ultimate_Macro\StrategyEditor\telemetry\last-reward.ini"
-    if FileExist(rewardFile) {
-        result := IniRead(rewardFile, "Reward", "Result", "")
-        rCoins := IniRead(rewardFile, "Reward", "Coins", 0)
-        rGems := IniRead(rewardFile, "Reward", "Gems", 0)
-        rExp := IniRead(rewardFile, "Reward", "EXP", 0)
-        rewardStrat := IniRead(rewardFile, "Reward", "Strategy", "")
-        LabStatsReward.Text := StrUpper(result) "  •  +" rCoins " Coins  •  +" rGems " Gems  •  +" rExp " EXP"
-            . (rewardStrat != "" ? "`n" LabStatsShortPath(rewardStrat) : "")
-    } else {
-        LabStatsReward.Text := "No confirmed run reward yet"
+    if LabStatsControlAlive(LabStatsReward) {
+        rewardFile := A_AppData "\Ultimate_Macro\StrategyEditor\telemetry\last-reward.ini"
+        if FileExist(rewardFile) {
+            result := IniRead(rewardFile, "Reward", "Result", "")
+            rCoins := IniRead(rewardFile, "Reward", "Coins", 0)
+            rGems := IniRead(rewardFile, "Reward", "Gems", 0)
+            rExp := IniRead(rewardFile, "Reward", "EXP", 0)
+            rewardStrat := IniRead(rewardFile, "Reward", "Strategy", "")
+            try LabStatsReward.Text := StrUpper(result) "  •  +" rCoins " Coins  •  +" rGems " Gems  •  +" rExp " EXP"
+                . (rewardStrat != "" ? "`n" LabStatsShortPath(rewardStrat) : "")
+        } else {
+            try LabStatsReward.Text := "No confirmed run reward yet"
+        }
     }
 
-    LabStatsUpdated.Text := "Updated " FormatTime(, "HH:mm:ss")
+    if LabStatsControlAlive(LabStatsUpdated)
+        try LabStatsUpdated.Text := "Updated " FormatTime(, "HH:mm:ss")
+}
+
+LabStatsExit(*) {
+    try SetTimer(LabStatsRefresh, 0)
 }
 
 SetTimer(LabStatsRefresh, 1000)
+OnExit(LabStatsExit)
