@@ -13,13 +13,14 @@
 #Include "%A_ScriptDir%\lib\StrategyLab\LabRemoteGate.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabStatsTab.ahk"
 
-; Strategy Lab 0.4.4 single-canvas editor.
-; Map + true placement footprints + center markers are painted into one in-memory
-; bitmap. Placements never create native controls; hit-testing remains geometric.
+; Strategy Lab 0.4.6 single-canvas editor.
+; Exact client screenshot + real TDS placement boundaries are painted into one bitmap.
+; The hotbar is excluded from the editable ROI and post-run calibration can refine the
+; visual placement center/scale without ever changing the source .strat coordinates.
 
 global LabEditorCtrls := []
-global LabEditorMarkerCtrls := []          ; compatibility: intentionally always empty
-global LabEditorMarkerByHwnd := Map()     ; compatibility: intentionally always empty
+global LabEditorMarkerCtrls := []
+global LabEditorMarkerByHwnd := Map()
 global LabEditorHitRegions := []
 global LabEditorDoc := ""
 global LabEditorLayer := "All placements"
@@ -38,8 +39,6 @@ global LabEditorCurrentMap := ""
 global LabEditorAssetSyncPid := 0
 global LabEditorAssetsRequested := false
 
-; The live Editor no longer writes viewport JPEGs. Keep the old path sentinels so an
-; older helper/update cannot crash if it still references them during a rolling update.
 global LabEditorViewportPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport-a.jpg"
 global LabEditorViewportAltPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport-b.jpg"
 global LabEditorViewportFrame := 0
@@ -50,8 +49,6 @@ global LabEditorCanvasY := 205
 global LabEditorCanvasW := 438
 global LabEditorCanvasH := 238
 
-; Controls are assigned by StrategyEditorCreateTab(). Every global used by an early
-; timer starts as a safe sentinel so AHK v2 can never throw on an unset variable.
 global LabEditorOpenBtn := ""
 global LabEditorCurrentBtn := ""
 global LabEditorSnapshotBtn := ""
@@ -95,8 +92,6 @@ global LabEditorSubtitle := ""
 global LabEditorHeaderLine := ""
 global LabEditorLayerLabel := ""
 
-; Compatibility helper retained for any rolling-update caller. The 0.4.3+ tower preview
-; is square/padded Picture art, so the live editor no longer clips portraits to a circle.
 StrategyEditorSetCircularRegion(ctrl, size) {
     if !IsObject(ctrl) || size <= 0
         return false
@@ -117,15 +112,13 @@ StrategyEditorSetCircularRegion(ctrl, size) {
 
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorUi.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorPlacements.ahk"
-#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorMaps.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorMaps046.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorSave.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabEditorStability.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorInteraction.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorWorkspace.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabEditorHotfix044.ahk"
 
-; 0.4.4 owns the four live canvas messages. Legacy handlers remain compiled for
-; compatibility/tests, but are no longer on the Windows message hot path.
 OnMessage(0x0201, Lab044CanvasMouseDown)
 OnMessage(0x0200, Lab044CanvasMouseMove)
 OnMessage(0x0202, Lab044CanvasMouseUp)
