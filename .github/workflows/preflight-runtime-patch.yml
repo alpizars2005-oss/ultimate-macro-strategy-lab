@@ -1,0 +1,42 @@
+name: Strategy Lab preflight runtime patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'channel/stable/files/submacros__lab_preflight.ps1'
+      - 'channel/stable/files/lib__StrategyLab__LabAutoMapCapture.ahk'
+      - 'tests/preflight_runtime_patch_test.ps1'
+      - '.github/workflows/preflight-runtime-patch.yml'
+  pull_request:
+    paths:
+      - 'channel/stable/files/submacros__lab_preflight.ps1'
+      - 'channel/stable/files/lib__StrategyLab__LabAutoMapCapture.ahk'
+      - 'tests/preflight_runtime_patch_test.ps1'
+      - '.github/workflows/preflight-runtime-patch.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  generated-main-hooks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate preflight patch idempotency
+        shell: powershell
+        run: |
+          & .\tests\preflight_runtime_patch_test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Parse automatic map capture module with AutoHotkey v2
+        shell: powershell
+        run: |
+          $url = 'https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.19/AutoHotkey_2.0.19.zip'
+          Invoke-WebRequest -Uri $url -OutFile ahk.zip
+          Expand-Archive -Path ahk.zip -DestinationPath ahk -Force
+          $exe = Get-ChildItem -Path ahk -Recurse -Filter AutoHotkey64.exe | Select-Object -First 1
+          if (!$exe) { throw 'AutoHotkey64.exe not found.' }
+          & $exe.FullName /Validate /ErrorStdOut=UTF-8 .\channel\stable\files\lib__StrategyLab__LabAutoMapCapture.ahk
+          if ($LASTEXITCODE -ne 0) { throw "Auto map capture module failed AHK /Validate with exit $LASTEXITCODE" }
