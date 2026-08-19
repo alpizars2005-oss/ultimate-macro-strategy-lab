@@ -51,7 +51,7 @@ function Install-MainGuiSubmitGuard([string]$Text,[string]$Main,[ref]$Changed) {
         return $Text
     }
 
-    $pattern = '(?m)^(?<indent>[ \t]*)if !IsSet\(MainGui\) or !MainGui[ \t]*\r?\n[ \t]+return[ \t]*\r?\n[ \t]*\r?\n[ \t]*v := MainGui\.Submit\(false\)[ \t]*$'
+    $pattern = '(?m)^(?<indent>[ \t]*)if !IsSet\(MainGui\) or !MainGui[ \t]*\r?\n[ \t]+return[ \t]*\r?\n[ \t]*\r?\n[ \t]*v := MainGui\.Submit\(false\)[ \t]*\r?$'
     $matches = [regex]::Matches($Text,$pattern)
     if ($matches.Count -ne 1) {
         throw "MainGui submit guard anchor is ambiguous (found $($matches.Count))."
@@ -82,7 +82,7 @@ function Install-AutoMapCaptureBoundary([string]$Text,[string]$Main,[ref]$Change
         return $Text
     }
 
-    $pattern = '(?m)^(?<indent>[ \t]*)CheckTheMapF\(\)[ \t]*$'
+    $pattern = '(?m)^(?<indent>[ \t]*)CheckTheMapF\(\)[ \t]*\r?$'
     $matches = [regex]::Matches($Text,$pattern)
     if ($matches.Count -ne 1) {
         throw "automatic map-capture anchor is ambiguous (found $($matches.Count) CheckTheMapF calls)."
