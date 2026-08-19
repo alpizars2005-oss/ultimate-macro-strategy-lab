@@ -41,10 +41,11 @@ StrategyEditorReleaseCanvasBitmap(*) {
             try old := DllCall("user32\SendMessageW", "Ptr", hwnd, "UInt", 0x0172,
                 "Ptr", 0, "Ptr", 0, "Ptr")
     }
-    if old
+    if old {
         try DllCall("gdi32\DeleteObject", "Ptr", old)
-    else
+    } else {
         try DllCall("gdi32\DeleteObject", "Ptr", current)
+    }
 }
 OnExit(StrategyEditorReleaseCanvasBitmap)
 
@@ -366,9 +367,11 @@ StrategyEditorCopySmallBitmap(pBitmap) {
         try Gdip_DisposeImage(pOut)
         return 0
     }
-    try Gdip_DrawImage(g, pBitmap, 0, 0, LabEditorCanvasW, LabEditorCanvasH, 0, 0, LabEditorCanvasW, LabEditorCanvasH)
-    finally
+    try {
+        Gdip_DrawImage(g, pBitmap, 0, 0, LabEditorCanvasW, LabEditorCanvasH, 0, 0, LabEditorCanvasW, LabEditorCanvasH)
+    } finally {
         try Gdip_DeleteGraphics(g)
+    }
     return pOut
 }
 
@@ -391,9 +394,11 @@ StrategyEditorBuildCompositeBitmap() {
             try Gdip_DisposeImage(pPan)
             return 0
         }
-        try StrategyEditorDrawSource(gPan, pSource, sourceW, sourceH, true)
-        finally
+        try {
+            StrategyEditorDrawSource(gPan, pSource, sourceW, sourceH, true)
+        } finally {
             try Gdip_DeleteGraphics(gPan)
+        }
         return pPan
     }
 
@@ -521,9 +526,11 @@ StrategyEditorRenderBackground(repositionMarkers := true) {
     pOut := StrategyEditorBuildCompositeBitmap()
     if pOut {
         hBitmap := 0
-        try hBitmap := StrategyEditorBitmapToHBITMAP(pOut)
-        finally
+        try {
+            hBitmap := StrategyEditorBitmapToHBITMAP(pOut)
+        } finally {
             try Gdip_DisposeImage(pOut)
+        }
 
         if hBitmap && StrategyEditorSwapCanvasBitmap(hBitmap) {
             try LabEditorSnapshot.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
@@ -672,7 +679,7 @@ StrategyEditorMaybeAutoSyncAssets(*) {
     LabEditorAssetsRequested := true
     if LabEditorControlAlive(LabEditorAssetBadge)
         try LabEditorAssetBadge.Text := "Map exact • portraits queued"
-    SetTimer(StrategyEditorSyncAssets, -180)
+    SetTimer(StrategyEditorSyncAssets, -120)
 }
 
 StrategyEditorSyncAssets(*) {
