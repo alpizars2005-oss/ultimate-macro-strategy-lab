@@ -4,16 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'channel/stable/files/lib__StrategyLab__StrategyEditor*.ahk'
-      - 'channel/stable/files/lib__StrategyLab__LabEditorStability.ahk'
-      - 'channel/stable/files/lib__StrategyLab__LabSimpleFootprints.ahk'
+      - 'channel/stable/files/lib__StrategyLab__*.ahk'
       - 'tests/editor_precreate_runtime_test.ahk'
       - '.github/workflows/editor-startup-runtime.yml'
   pull_request:
     paths:
-      - 'channel/stable/files/lib__StrategyLab__StrategyEditor*.ahk'
-      - 'channel/stable/files/lib__StrategyLab__LabEditorStability.ahk'
-      - 'channel/stable/files/lib__StrategyLab__LabSimpleFootprints.ahk'
+      - 'channel/stable/files/lib__StrategyLab__*.ahk'
       - 'tests/editor_precreate_runtime_test.ahk'
       - '.github/workflows/editor-startup-runtime.yml'
 
@@ -36,14 +32,29 @@ jobs:
           if (!$exe) { throw 'AutoHotkey64.exe not found in release archive.' }
           "AHK_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Stage install-style Strategy Lab tree
+        shell: pwsh
+        run: |
+          $stage = Join-Path (Get-Location).Path '_editor_runtime_stage'
+          $lib = Join-Path $stage 'lib\StrategyLab'
+          New-Item -ItemType Directory -Force -Path $lib | Out-Null
+
+          Get-ChildItem 'channel\stable\files' -Filter 'lib__StrategyLab__*.ahk' | ForEach-Object {
+            $name = $_.Name.Substring('lib__StrategyLab__'.Length)
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $lib $name) -Force
+          }
+
+          Copy-Item -LiteralPath 'tests\editor_precreate_runtime_test.ahk' -Destination (Join-Path $stage 'editor_precreate_runtime_test.ahk') -Force
+          "EDITOR_RUNTIME_STAGE=$stage" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Run Editor pre-create lifecycle smoke test
         shell: pwsh
         run: |
-          $script = (Resolve-Path 'tests/editor_precreate_runtime_test.ahk').Path
+          $script = Join-Path $env:EDITOR_RUNTIME_STAGE 'editor_precreate_runtime_test.ahk'
           $psi = New-Object Diagnostics.ProcessStartInfo
           $psi.FileName = $env:AHK_EXE
           $psi.Arguments = '/ErrorStdOut=UTF-8 "' + $script + '"'
-          $psi.WorkingDirectory = (Get-Location).Path
+          $psi.WorkingDirectory = $env:EDITOR_RUNTIME_STAGE
           $psi.UseShellExecute = $false
           $psi.CreateNoWindow = $true
           $psi.RedirectStandardOutput = $true
