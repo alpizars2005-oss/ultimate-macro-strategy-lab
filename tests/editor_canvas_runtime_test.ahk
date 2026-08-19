@@ -44,6 +44,16 @@ Gdip_SaveBitmapToFile(bitmap, path, quality := 90) {
 
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorTab.ahk"
 
+; This contract tests the renderer synchronously. Background product timers are covered
+; by the separate startup lifecycle test and would only add nondeterminism here.
+try SetTimer(StrategyEditorWorkspaceMonitor, 0)
+try SetTimer(StrategyEditorInteractiveStateGuard, 0)
+try SetTimer(StrategyEditorInstallDirectNavigation, 0)
+try SetTimer(LabStatsRefresh, 0)
+try SetTimer(LabRewardTrackerTick, 0)
+try SetTimer(LabTelemetryTick, 0)
+try SetTimer(LabRewardMaybeSyncAssets, 0)
+
 fail(message) {
     try FileAppend("FAIL: " message "`n", "*")
     ExitApp(1)
@@ -66,7 +76,6 @@ class FakeEditorDoc {
     }
 }
 
-; Create the actual Editor controls so the renderer can use the real single Picture.
 MainGui := Gui()
 StrategyEditorCreateTab(MainGui)
 LabEditorDoc := FakeEditorDoc()
@@ -79,16 +88,20 @@ output := A_Temp "\strategy-lab-canvas-output.jpg"
 try FileDelete(source)
 try FileDelete(output)
 FileAppend("fake source", source, "UTF-8-RAW")
-LabEditorSourceImage := source
-LabEditorBackgroundMode := "camera"
 
-; The 0.4 placement renderer must never create per-placement controls.
+; BuildMarkers must remain a state/list operation only. Keep the source empty here so
+; it cannot ask the native Picture control to decode our deliberately fake JPEG stub.
+LabEditorSourceImage := ""
+LabEditorBackgroundMode := "none"
 StrategyEditorBuildMarkers()
 if (LabEditorMarkerCtrls.Length != 0)
     fail("StrategyEditorBuildMarkers created placement Gui.Controls")
 if (LabEditorMarkerByHwnd.Count != 0)
     fail("StrategyEditorBuildMarkers populated HWND marker map")
 
+; Test the compositing function directly in-memory/headless.
+LabEditorSourceImage := source
+LabEditorBackgroundMode := "camera"
 if !StrategyEditorRenderCompositeFrame(output)
     fail("single-canvas composite frame did not render")
 if (LabEditorHitRegions.Length != 3)
@@ -109,7 +122,9 @@ for region in LabEditorHitRegions {
         fail("filtered Warden placement remained on canvas")
 }
 
-; Radii cycle is state-only and must never create another HWND.
+; Radii cycle is state-only and must never create another HWND. Disable the fake source
+; first so the UI rerender path stays on the dark fallback instead of decoding stub bytes.
+LabEditorSourceImage := ""
 LabEditorRingMode := "all"
 StrategyEditorToggleRings()
 if (LabEditorRingMode != "selected")
