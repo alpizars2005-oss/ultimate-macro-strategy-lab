@@ -14,6 +14,7 @@
 ; are composited into the map frame itself, never as a second sibling control.
 
 global LabEditorShuttingDown := false
+global LabEditorFootprintUiAttempts := 0
 
 LabEditorControlAlive(ctrl) {
     if !IsObject(ctrl)
@@ -51,6 +52,24 @@ LabEditorDisableSiblingFootprints() {
     LabEditorRingMode := "off"
 }
 
+LabEditorApplySafeFootprintUi(*) {
+    global LabEditorRingsBtn, LabEditorFootprintUiAttempts, LabEditorShuttingDown
+    if LabEditorShuttingDown
+        return
+
+    LabEditorFootprintUiAttempts += 1
+    if !IsSet(LabEditorRingsBtn) || !LabEditorControlAlive(LabEditorRingsBtn) {
+        if (LabEditorFootprintUiAttempts < 24)
+            SetTimer(LabEditorApplySafeFootprintUi, -250)
+        return
+    }
+
+    ; Keep the control visible as an explicit status indicator, but do not let a click
+    ; re-enable the retired sibling-HWND code path.
+    try LabEditorRingsBtn.Text := "Footprint: Safe Off"
+    try LabEditorRingsBtn.Enabled := false
+}
+
 LabEditorLifecycleExit(*) {
     global LabEditorShuttingDown, LabEditorCanvasBg, LabEditorSnapshot
     LabEditorShuttingDown := true
@@ -59,6 +78,7 @@ LabEditorLifecycleExit(*) {
     try SetTimer(StrategyEditorWorkspaceMonitor, 0)
     try SetTimer(StrategyEditorInteractiveStateGuard, 0)
     try SetTimer(LabSimpleFootprintsApply, 0)
+    try SetTimer(LabEditorApplySafeFootprintUi, 0)
 
     ; IsObject(control) remains true after native destruction. Clearing the two active
     ; sentinels makes any late message/timer fail closed instead of dereferencing them.
@@ -67,4 +87,5 @@ LabEditorLifecycleExit(*) {
 }
 
 LabEditorDisableSiblingFootprints()
+SetTimer(LabEditorApplySafeFootprintUi, -250)
 OnExit(LabEditorLifecycleExit)
