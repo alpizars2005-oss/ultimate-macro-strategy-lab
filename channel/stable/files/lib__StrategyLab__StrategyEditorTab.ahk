@@ -93,6 +93,32 @@ global LabEditorSubtitle := ""
 global LabEditorHeaderLine := ""
 global LabEditorLayerLabel := ""
 
+; Small GUI-only helper used by the selected-unit vanity badge. Placement circles are
+; NOT native controls in 0.4; they remain composited into the map bitmap. Keeping this
+; helper here makes its dependency explicit before StrategyEditorUi.ahk is parsed.
+StrategyEditorSetCircularRegion(ctrl, size) {
+    if !IsObject(ctrl) || size <= 0
+        return false
+
+    hwnd := 0
+    try hwnd := ctrl.Hwnd
+    if !hwnd || !DllCall("user32\IsWindow", "Ptr", hwnd, "Int")
+        return false
+
+    diameter := Max(1, Round(size))
+    region := DllCall("gdi32\CreateEllipticRgn",
+        "Int", 0, "Int", 0, "Int", diameter + 1, "Int", diameter + 1, "Ptr")
+    if !region
+        return false
+
+    ; After a successful SetWindowRgn Windows owns the HRGN. Delete it only on failure.
+    if DllCall("user32\SetWindowRgn", "Ptr", hwnd, "Ptr", region, "Int", 1)
+        return true
+
+    DllCall("gdi32\DeleteObject", "Ptr", region)
+    return false
+}
+
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorUi.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorPlacements.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorMaps.ahk"
