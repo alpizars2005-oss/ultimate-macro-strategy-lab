@@ -200,7 +200,7 @@ StrategyEditorDrawPlacement(graphics, index, placement, point, fast := false) {
         label := StrategyEditorMarkerLabel(placement)
         size := selected ? 8 : 7
         options := "x" (point.x - markerRadius) " y" (point.y - markerRadius - 1)
-            " w" markerDiameter " h" markerDiameter " Center vCenter cFFFFFFFF s" size " Bold"
+            . " w" markerDiameter " h" markerDiameter " Center vCenter cFFFFFFFF s" size " Bold"
         try Gdip_TextToGraphics(graphics, label, options, "Segoe UI")
     }
 
@@ -269,7 +269,7 @@ StrategyEditorRenderCompositeFrame(outputPath) {
 }
 
 StrategyEditorRenderBackground(repositionMarkers := true) {
-    global LabEditorSourceImage, LabEditorViewportPath, LabEditorViewportAltPath, LabEditorViewportFrame
+    global LabEditorSourceImage, LabEditorViewport, LabEditorViewportPath, LabEditorViewportAltPath, LabEditorViewportFrame
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
     global LabEditorSnapshot, LabEditorCanvasBg, LabEditorCanvasHint, LabEditorZoomLabel, LabEditorHitRegions
 
