@@ -2,6 +2,7 @@
 #Include "%A_ScriptDir%\lib\StrategyLab\MapLibrary.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabAutoMapCapture.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\TowerCatalog.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\LabFootprintGeometry.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabRewardCatalog.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyCalibration.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabStrategyValidation.ahk"
@@ -12,12 +13,9 @@
 #Include "%A_ScriptDir%\lib\StrategyLab\LabRemoteGate.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabStatsTab.ahk"
 
-; Strategy Lab 0.4 single-canvas editor.
-;
-; The map screenshot, placement-radius circles and numbered markers are composited into
-; ONE bitmap. There are no per-placement Gui.Controls and no transparent sibling ring
-; HWNDs. Hit-testing is geometric, which keeps drag/layer/zoom independent from Windows
-; control z-order and eliminates the visual stacking/tearing seen in the 0.3.x editor.
+; Strategy Lab 0.4.3 single-canvas editor.
+; Map + true placement footprints + center markers are painted into one in-memory
+; bitmap. Placements never create native controls; hit-testing remains geometric.
 
 global LabEditorCtrls := []
 global LabEditorMarkerCtrls := []          ; compatibility: intentionally always empty
@@ -37,12 +35,15 @@ global LabEditorSourceImage := ""
 global LabEditorBackgroundMode := "none"
 global LabEditorExpanded := false
 global LabEditorCurrentMap := ""
-global LabEditorAssetSyncPid := 0          ; legacy compatibility; web editor sync retired
+global LabEditorAssetSyncPid := 0
 global LabEditorAssetsRequested := false
 
+; The live Editor no longer writes viewport JPEGs. Keep the old path sentinels so an
+; older helper/update cannot crash if it still references them during a rolling update.
 global LabEditorViewportPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport-a.jpg"
 global LabEditorViewportAltPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport-b.jpg"
 global LabEditorViewportFrame := 0
+global LabEditorCanvasBitmap := 0
 
 global LabEditorCanvasX := 20
 global LabEditorCanvasY := 205
@@ -94,28 +95,22 @@ global LabEditorSubtitle := ""
 global LabEditorHeaderLine := ""
 global LabEditorLayerLabel := ""
 
-; Small GUI-only helper used by the selected-unit vanity badge. Placement circles are
-; NOT native controls in 0.4; they remain composited into the map bitmap. Keeping this
-; helper here makes its dependency explicit before StrategyEditorUi.ahk is parsed.
+; Compatibility helper retained for any rolling-update caller. The 0.4.3 tower preview
+; is square/padded Picture art, so the live editor no longer clips portraits to a circle.
 StrategyEditorSetCircularRegion(ctrl, size) {
     if !IsObject(ctrl) || size <= 0
         return false
-
     hwnd := 0
     try hwnd := ctrl.Hwnd
     if !hwnd || !DllCall("user32\IsWindow", "Ptr", hwnd, "Int")
         return false
-
     diameter := Max(1, Round(size))
     region := DllCall("gdi32\CreateEllipticRgn",
         "Int", 0, "Int", 0, "Int", diameter + 1, "Int", diameter + 1, "Ptr")
     if !region
         return false
-
-    ; After a successful SetWindowRgn Windows owns the HRGN. Delete it only on failure.
     if DllCall("user32\SetWindowRgn", "Ptr", hwnd, "Ptr", region, "Int", 1)
         return true
-
     DllCall("gdi32\DeleteObject", "Ptr", region)
     return false
 }

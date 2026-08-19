@@ -77,29 +77,42 @@ function Install-MainGuiSubmitGuard([string]$Text,[string]$Main,[ref]$Changed) {
 }
 
 function Install-AutoMapCaptureBoundary([string]$Text,[string]$Main,[ref]$Changed) {
-    if ($Text.Contains('; <StrategyLabAutoMapCapture>')) {
-        Log 'OK automatic map-capture boundary already installed.'
-        return $Text
-    }
+    $original = $Text
 
-    $pattern = '(?m)^(?<indent>[ \t]*)CheckTheMapF\(\)[ \t]*\r?$'
+    # Remove either the old 0.4.2 CheckTheMapF hook or a previous 0.4.3 SpawnTower hook,
+    # then install exactly one canonical block. This makes migration + repeated preflight
+    # idempotent and prevents the lobby/map-vote screenshot regression.
+    $marked = '(?ms)^[ \t]*; <StrategyLabAutoMapCapture>[ \t]*\r?\n.*?^[ \t]*; </StrategyLabAutoMapCapture>[ \t]*\r?\n?'
+    $Text = [regex]::Replace($Text,$marked,'')
+
+    $pattern = '(?m)^(?<indent>[ \t]*)SpawnTower[ \t]*\([^\r\n]*\)[ \t]*\{[ \t]*\r?$'
     $matches = [regex]::Matches($Text,$pattern)
     if ($matches.Count -ne 1) {
-        throw "automatic map-capture anchor is ambiguous (found $($matches.Count) CheckTheMapF calls)."
+        throw "automatic map-capture SpawnTower anchor is ambiguous (found $($matches.Count))."
     }
 
     $m = $matches[0]
     $indent = $m.Groups['indent'].Value
+    $inner = $indent + '    '
     $block = $m.Value.TrimEnd("`r","`n") + "`r`n" +
-        $indent + '; <StrategyLabAutoMapCapture>' + "`r`n" +
-        $indent + '; One-shot exact editor screenshot after normal/special-map camera alignment.' + "`r`n" +
-        $indent + 'try LabMapAutoCaptureIfMissing(gamemap)' + "`r`n" +
-        $indent + '; </StrategyLabAutoMapCapture>'
+        $inner + '; <StrategyLabAutoMapCapture>' + "`r`n" +
+        $inner + '; Capture only after the match exists, before this first tower is placed.' + "`r`n" +
+        $inner + 'try LabMapAutoCaptureCurrent()' + "`r`n" +
+        $inner + '; </StrategyLabAutoMapCapture>'
 
-    Backup-Main $Main 'automatic map screenshot boundary' | Out-Null
     $Text = $Text.Substring(0,$m.Index) + $block + $Text.Substring($m.Index + $m.Length)
-    $Changed.Value = $true
-    Log 'INSTALLED one-shot automatic map screenshot boundary after CheckTheMapF().'
+    $count = [regex]::Matches($Text,'LabMapAutoCaptureCurrent\(\)').Count
+    if ($count -ne 1) {
+        throw "automatic map-capture normalization produced $count runtime calls."
+    }
+
+    if ($Text -ne $original) {
+        Backup-Main $Main 'automatic map screenshot SpawnTower boundary' | Out-Null
+        $Changed.Value = $true
+        Log 'INSTALLED/NORMALIZED one-shot automatic map capture at SpawnTower entry.'
+    } else {
+        Log 'OK automatic map-capture SpawnTower boundary already normalized.'
+    }
     return $Text
 }
 
@@ -166,6 +179,7 @@ function Verify-LabModules([string]$InstallRoot) {
         'lib\StrategyLab\StrategyEditorInteraction.ahk',
         'lib\StrategyLab\MapLibrary.ahk',
         'lib\StrategyLab\LabAutoMapCapture.ahk',
+        'lib\StrategyLab\LabFootprintGeometry.ahk',
         'lib\StrategyLab\LabEditorStability.ahk',
         'lib\StrategyLab\LabStatsTab.ahk',
         'lib\StrategyLab\LabSafety.ahk',
@@ -174,6 +188,7 @@ function Verify-LabModules([string]$InstallRoot) {
         'lib\StrategyLab\LabRewardCatalog.ahk',
         'lib\StrategyLab\LabRewardTracker.ahk',
         'lib\StrategyLab\LabRemoteGate.ahk',
+        'submacros\lab_tower_assets.ps1',
         'submacros\lab_fingerprint.ps1',
         'submacros\lab_discord_worker.ps1',
         'submacros\lab_remote_settings.ps1'
@@ -183,7 +198,7 @@ function Verify-LabModules([string]$InstallRoot) {
         if (!(Test-Path -LiteralPath (Join-Path $InstallRoot $relative) -PathType Leaf)) { $missing += $relative }
     }
     if ($missing.Count -gt 0) { throw ('Required Strategy Lab modules are missing: ' + ($missing -join ', ')) }
-    Log 'OK Strategy Lab 0.4 required module set present.'
+    Log 'OK Strategy Lab 0.4.3 required module set present.'
 }
 
 try {

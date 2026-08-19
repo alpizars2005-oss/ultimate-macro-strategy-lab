@@ -3,11 +3,11 @@
 #Warn All, Off
 
 ; Compile-only contract for LabAutoMapCapture. The production module intentionally
-; depends on MapLibrary + Ultimate Macro/GDI+ helpers, so declare their signatures here
-; rather than trying to parse the module as a standalone program.
+; depends on MapLibrary + Ultimate Macro/GDI+ helpers, so declare their signatures here.
 
 LabMapCameraPath(mapName) => ""
-LabMapSaveCameraCapture(mapName, sourcePath) => sourcePath
+LabMapCameraNeedsRefresh(mapName) => true
+LabMapSaveCameraBitmap(mapName, pBitmap, stage := "manual") => "camera.jpg"
 
 getRobloxPos(&x, &y, &w, &h) {
     x := 0
@@ -17,7 +17,6 @@ getRobloxPos(&x, &y, &w, &h) {
 }
 
 Gdip_BitmapFromScreen(*) => 1
-Gdip_SaveBitmapToFile(*) => 0
 Gdip_DisposeImage(*) => 0
 
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabAutoMapCapture.ahk"

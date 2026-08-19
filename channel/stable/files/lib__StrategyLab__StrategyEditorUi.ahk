@@ -16,7 +16,7 @@ StrategyEditorCreateTab(gui) {
     gui.SetFont("s11 w700 c4CA3FF", "Segoe UI")
     LabEditorTitle := gui.Add("Text", "x20 y94 w300 h24 Hidden", "Visual Strategy Editor")
     gui.SetFont("s7 w400 c8E8E8E", "Segoe UI")
-    LabEditorSubtitle := gui.Add("Text", "x20 y116 w520 h18 Hidden", "Exact Roblox screenshot • single-canvas circles • safe saves")
+    LabEditorSubtitle := gui.Add("Text", "x20 y116 w520 h18 Hidden", "Exact map screenshot • true placement footprints • safe saves")
     LabEditorAssetBadge := gui.Add("Text", "x470 y103 w200 h18 Hidden Right c8E8E8E", "Map source: waiting for strategy")
     LabEditorHeaderLine := gui.Add("Progress", "x20 y137 w650 h1 Hidden Background333333", 0)
 
@@ -38,35 +38,35 @@ StrategyEditorCreateTab(gui) {
     gui.SetFont("s8 w400 c000000", "Segoe UI")
     LabEditorLayerCtrl := gui.Add("DropDownList", "x55 y177 w230 Hidden", ["All placements"])
     gui.SetFont("s8 w500 cFFFFFF", "Segoe UI")
-    ; Kept as hidden compatibility sentinels. Mouse drag/pan is direct on the canvas.
+    ; Direct mouse pan/drag owns navigation. Hidden controls remain only for compatibility.
     LabEditorPanLeftBtn := gui.Add("Button", "x-1000 y-1000 w1 h1 Hidden", "←")
     LabEditorPanUpBtn := gui.Add("Button", "x-1000 y-1000 w1 h1 Hidden", "↑")
     LabEditorPanDownBtn := gui.Add("Button", "x-1000 y-1000 w1 h1 Hidden", "↓")
     LabEditorPanRightBtn := gui.Add("Button", "x-1000 y-1000 w1 h1 Hidden", "→")
-    LabEditorSyncBtn := gui.Add("Button", "x298 y177 w104 h24 Hidden", "Refresh View")
-    LabEditorRingsBtn := gui.Add("Button", "x412 y177 w92 h24 Hidden", "Radii: All")
+    LabEditorSyncBtn := gui.Add("Button", "x298 y177 w104 h24 Hidden", "Sync Portraits")
+    LabEditorRingsBtn := gui.Add("Button", "x412 y177 w92 h24 Hidden", "Footprints: All")
     LabEditorRemoteBtn := gui.Add("Button", "x532 y177 w64 h24 Hidden", "Remote")
     gui.SetFont("s7 w500 cA8A8A8", "Segoe UI")
     LabEditorMapLabel := gui.Add("Text", "x600 y181 w70 h18 Hidden Right", "Map: -")
 
-    ; Only TWO native canvas controls: a dark fallback + the fully composited frame.
+    ; Only TWO native canvas controls: a dark fallback + one SS_BITMAP surface. The
+    ; renderer swaps an in-memory HBITMAP into this Picture; it never writes a frame to disk.
     LabEditorCanvasBg := gui.Add("Text", "x" LabEditorCanvasX " y" LabEditorCanvasY
         " w" LabEditorCanvasW " h" LabEditorCanvasH " Hidden +Border Background171717")
     LabEditorSnapshot := gui.Add("Picture", "x" LabEditorCanvasX " y" LabEditorCanvasY
-        " w" LabEditorCanvasW " h" LabEditorCanvasH " Hidden +Border")
+        " w" LabEditorCanvasW " h" LabEditorCanvasH " Hidden +Border 0xE")
     gui.SetFont("s9 w600 c777777", "Segoe UI")
     LabEditorCanvasHint := gui.Add("Text", "x75 y292 w330 h48 Hidden Center Background171717",
-        "No camera screenshot for this map yet.`nOpen Roblox on the map and press Capture Map.")
+        "No exact camera screenshot for this map yet.`nRun the strategy once or press Capture Map.")
 
     LabEditorInfoPanel := gui.Add("Text", "x470 y205 w200 h238 Hidden +Border Background171717")
-    ; Local vanity badge: no website image and no separate in-map control.
-    gui.SetFont("s17 w700 cFFFFFF", "Segoe UI")
-    LabEditorTowerPortrait := gui.Add("Text", "x482 y217 w62 h62 Hidden Center 0x200 +Border Background283341", "?")
-    StrategyEditorSetCircularRegion(LabEditorTowerPortrait, 62)
+    ; Portraits are small local cache files sourced from the TDS Wiki. They are padded
+    ; to a square preview so the entire unit remains visible instead of being cropped.
+    LabEditorTowerPortrait := gui.Add("Picture", "x482 y217 w62 h62 Hidden +Border Background15191F")
     gui.SetFont("s10 w700 cF2F2F2", "Segoe UI")
     LabEditorTowerName := gui.Add("Text", "x554 y218 w106 h38 Hidden Background171717", "Select a placement")
     gui.SetFont("s7 w400 c9C9C9C", "Segoe UI")
-    LabEditorTowerMeta := gui.Add("Text", "x554 y258 w106 h42 Hidden Background171717", "Click a circle or row")
+    LabEditorTowerMeta := gui.Add("Text", "x554 y258 w106 h42 Hidden Background171717", "Click a footprint or row")
 
     gui.SetFont("s8 w400 cEAEAEA", "Segoe UI")
     LabEditorList := gui.Add("ListView", "x480 y306 w180 h127 Hidden Grid -Multi Background202020 cEAEAEA", ["#", "Unit", "X", "Y"])
@@ -154,7 +154,7 @@ StrategyEditorShow() {
 }
 
 ; Compatibility helper for any old caller. In 0.4 hwnd is irrelevant; hit-testing is
-; performed against the circles painted into the canvas.
+; performed against geometry painted into the canvas.
 StrategyEditorTryBeginDrag(hwnd := 0) {
     StrategyEditorGetClientCursor(&mx, &my)
     index := StrategyEditorHitTestPlacement(mx, my)

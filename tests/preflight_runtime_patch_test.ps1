@@ -17,6 +17,7 @@ try {
         'lib\StrategyLab\StrategyEditorInteraction.ahk',
         'lib\StrategyLab\MapLibrary.ahk',
         'lib\StrategyLab\LabAutoMapCapture.ahk',
+        'lib\StrategyLab\LabFootprintGeometry.ahk',
         'lib\StrategyLab\LabEditorStability.ahk',
         'lib\StrategyLab\LabStatsTab.ahk',
         'lib\StrategyLab\LabSafety.ahk',
@@ -25,6 +26,7 @@ try {
         'lib\StrategyLab\LabRewardCatalog.ahk',
         'lib\StrategyLab\LabRewardTracker.ahk',
         'lib\StrategyLab\LabRemoteGate.ahk',
+        'submacros\lab_tower_assets.ps1',
         'submacros\lab_fingerprint.ps1',
         'submacros\lab_discord_worker.ps1',
         'submacros\lab_remote_settings.ps1'
@@ -39,6 +41,8 @@ try {
     $preflightTarget = Join-Path $root 'submacros\lab_preflight.ps1'
     Copy-Item -LiteralPath $preflightSource -Destination $preflightTarget -Force
 
+    # Start from the old 0.4.2 hook position so this also proves migration removes the
+    # lobby-stage capture and reinstalls the marker inside SpawnTower exactly once.
     $fixture = @'
 #Requires AutoHotkey v2.0
 
@@ -53,7 +57,16 @@ RunStrategy() {
     switched := false
     if (!IsRestarting) {
         CheckTheMapF()
+        ; <StrategyLabAutoMapCapture>
+        ; One-shot exact editor screenshot after normal/special-map camera alignment.
+        try LabMapAutoCaptureIfMissing(gamemap)
+        ; </StrategyLabAutoMapCapture>
     }
+}
+
+SpawnTower(X, Y, slotNumber, towerID) {
+    currentSlot := slotNumber
+    return currentSlot
 }
 '@
     $main = Join-Path $root 'Main_Lab.ahk'
@@ -78,13 +91,23 @@ RunStrategy() {
         'try labMainHwnd := MainGui.Hwnd',
         'DllCall("user32\IsWindow", "Ptr", labMainHwnd, "Int")',
         '; <StrategyLabAutoMapCapture>',
-        'try LabMapAutoCaptureIfMissing(gamemap)',
+        'try LabMapAutoCaptureCurrent()',
         '; <StrategyLabRemoteBoundary>'
     )
     foreach ($needle in $checks) {
         if (!$patched.Contains($needle)) {
             throw "patched Main_Lab is missing: $needle"
         }
+    }
+
+    if ($patched.Contains('LabMapAutoCaptureIfMissing(gamemap)')) {
+        throw 'legacy CheckTheMapF/lobby capture call remained after migration'
+    }
+
+    $spawnPos = $patched.IndexOf('SpawnTower(X, Y, slotNumber, towerID)')
+    $capturePos = $patched.IndexOf('try LabMapAutoCaptureCurrent()')
+    if ($spawnPos -lt 0 -or $capturePos -lt $spawnPos) {
+        throw 'automatic capture is not installed inside SpawnTower'
     }
 
     foreach ($marker in @('; <StrategyLabMainGuiGuard>','; <StrategyLabAutoMapCapture>','; <StrategyLabRemoteBoundary>')) {
@@ -94,7 +117,7 @@ RunStrategy() {
         }
     }
 
-    Write-Host 'PASS: preflight installs idempotent MainGui, auto-map capture and Remote hooks.' -ForegroundColor Green
+    Write-Host 'PASS: preflight migrates capture to SpawnTower and keeps all hooks idempotent.' -ForegroundColor Green
 }
 finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue

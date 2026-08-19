@@ -1,4 +1,4 @@
-# Strategy Lab stable delivery map 0.4.2 runtime guard + automatic map capture
+# Strategy Lab stable delivery map 0.4.3 exact footprints + in-memory canvas
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 run_lab.bat|channel/stable/files/run_lab.bat|raw
@@ -19,6 +19,7 @@ lib/StrategyLab/StrategyCalibration.ahk|channel/stable/files/lib__StrategyLab__S
 lib/StrategyLab/MapLibrary.ahk|channel/stable/files/lib__StrategyLab__MapLibrary.ahk|raw
 lib/StrategyLab/LabAutoMapCapture.ahk|channel/stable/files/lib__StrategyLab__LabAutoMapCapture.ahk|raw
 lib/StrategyLab/TowerCatalog.ahk|channel/stable/files/lib__StrategyLab__TowerCatalog.ahk|raw
+lib/StrategyLab/LabFootprintGeometry.ahk|channel/stable/files/lib__StrategyLab__LabFootprintGeometry.ahk|raw
 lib/StrategyLab/LabRewardCatalog.ahk|channel/stable/files/lib__StrategyLab__LabRewardCatalog.ahk|raw
 lib/StrategyLab/LabRewardTracker.ahk|channel/stable/files/lib__StrategyLab__LabRewardTracker.ahk|raw
 lib/StrategyLab/LabStatsTab.ahk|channel/stable/files/lib__StrategyLab__LabStatsTab.ahk|raw
@@ -27,6 +28,7 @@ lib/StrategyLab/LabSafety.ahk|channel/stable/files/lib__StrategyLab__LabSafety.a
 lib/StrategyLab/LabTelemetry.ahk|channel/stable/files/lib__StrategyLab__LabTelemetry.ahk|raw
 lib/StrategyLab/LabRemoteGate.ahk|channel/stable/files/lib__StrategyLab__LabRemoteGate.ahk|raw
 submacros/lab_calibration_worker.ahk|channel/stable/files/submacros__lab_calibration_worker.ahk|raw
+submacros/lab_tower_assets.ps1|channel/stable/files/submacros__lab_tower_assets.ps1|raw
 submacros/lab_reward_assets.ps1|channel/stable/files/submacros__lab_reward_assets.ps1|raw
 submacros/lab_fingerprint.ps1|channel/stable/files/submacros__lab_fingerprint.ps1|raw
 submacros/lab_discord_worker.ps1|channel/stable/files/submacros__lab_discord_worker.ps1|raw

@@ -1,12 +1,10 @@
 #Requires AutoHotkey v2.0
 
 ; Strategy Lab map library.
-; A camera capture made by Ultimate Macro is authoritative for SpawnTower editing.
-; Wiki top-down images are reference-only until a future projective calibration is saved.
+; The authoritative editor background is the exact Roblox client view captured with the
+; same fixed Ultimate Macro camera that produced the SpawnTower coordinates. Wiki maps
+; are never used for coordinate editing.
 
-; Keep the active source bitmap decoded while the user pans/zooms. Previously every
-; frame validated the image and decoded it again, which meant two disk/decode passes
-; per render. This cache is invalidated automatically when the file timestamp/size changes.
 global LabMapRenderCache := {path: "", stamp: "", size: 0, bitmap: 0, width: 0, height: 0}
 OnExit(LabMapReleaseRenderCache)
 
@@ -31,6 +29,8 @@ LabMapCameraDir() {
 }
 
 LabMapReferenceDir() {
+    ; Kept only for backwards-compatible cleanup/migration. The 0.4+ editor does not
+    ; use web/top-down reference images for coordinate editing.
     dir := LabMapRoot() "\reference"
     if !DirExist(dir)
         DirCreate(dir)
@@ -93,14 +93,14 @@ LabMapImageUsable(path) {
 }
 
 LabMapFindCachedFile(dir, key) {
-    for ext in ["png", "jpg", "jpeg", "bmp"] {
+    ; 0.4.3 writes JPEG first. Check it before legacy PNG so a stale 0.4.2 capture can
+    ; never win after a successful refresh.
+    for ext in ["jpg", "jpeg", "png", "bmp"] {
         path := dir "\" key "." ext
         if !FileExist(path)
             continue
         if LabMapImageUsable(path)
             return path
-        ; A previous network error may have left HTML/WebP under a PNG/JPG name.
-        ; Purge it so Sync Assets can retry instead of getting stuck forever.
         try FileDelete(path)
     }
     return ""
@@ -120,21 +120,121 @@ LabMapPreferredBackground(mapName) {
     camera := LabMapCameraPath(mapName)
     if (camera != "")
         return {path: camera, mode: "camera", calibrated: true, label: "Macro camera library"}
-    reference := LabMapReferencePath(mapName)
-    if (reference != "")
-        return {path: reference, mode: "reference", calibrated: false, label: "Wiki top-down reference"}
-    return {path: "", mode: "none", calibrated: false, label: "No cached map image"}
+    return {path: "", mode: "none", calibrated: false, label: "No exact camera screenshot"}
 }
 
-LabMapSaveCameraCapture(mapName, sourcePath) {
+LabMapCameraMetaPath(mapName) {
     entry := LabMapResolve(mapName)
-    if (entry.key = "" || !FileExist(sourcePath))
+    return entry.key != "" ? LabMapCameraDir() "\" entry.key ".meta.ini" : ""
+}
+
+LabMapCameraCaptureStage(mapName) {
+    meta := LabMapCameraMetaPath(mapName)
+    if (meta = "" || !FileExist(meta))
         return ""
-    target := LabMapCameraDir() "\" entry.key ".png"
-    FileCopy(sourcePath, target, true)
-    ; If this map was currently cached, force the next render to decode the new capture.
-    LabMapInvalidateRenderCache(target)
-    return LabMapImageUsable(target) ? target : ""
+    try return Trim(IniRead(meta, "Capture", "Stage", ""))
+    catch
+        return ""
+}
+
+LabMapCameraNeedsRefresh(mapName) {
+    camera := LabMapCameraPath(mapName)
+    if (camera = "")
+        return true
+    ; 0.4.2 could capture the map-vote/lobby screen before the match. It wrote no
+    ; metadata, so one successful SpawnTower-stage capture transparently replaces it.
+    return LabMapCameraCaptureStage(mapName) = ""
+}
+
+LabMapWriteCameraMeta(mapName, stage, width := 0, height := 0) {
+    meta := LabMapCameraMetaPath(mapName)
+    if (meta = "")
+        return
+    try {
+        IniWrite(stage, meta, "Capture", "Stage")
+        IniWrite("0.4.3", meta, "Capture", "WriterVersion")
+        IniWrite(FormatTime(, "yyyy-MM-dd HH:mm:ss"), meta, "Capture", "CapturedAt")
+        if (width > 0)
+            IniWrite(width, meta, "Capture", "Width")
+        if (height > 0)
+            IniWrite(height, meta, "Capture", "Height")
+    }
+}
+
+LabMapRemoveCameraVariants(key, keepPath := "") {
+    if (key = "")
+        return
+    for ext in ["jpg", "jpeg", "png", "bmp"] {
+        path := LabMapCameraDir() "\" key "." ext
+        if (keepPath != "" && path = keepPath)
+            continue
+        if FileExist(path)
+            try FileDelete(path)
+    }
+}
+
+; Save from an already-decoded bitmap. This is the preferred auto-capture path: no
+; intermediate PNG and no FileCopy over a GDI+-locked image.
+LabMapSaveCameraBitmap(mapName, pBitmap, stage := "manual") {
+    entry := LabMapResolve(mapName)
+    if (entry.key = "" || !pBitmap)
+        return ""
+
+    width := 0
+    height := 0
+    try width := Gdip_GetImageWidth(pBitmap)
+    try height := Gdip_GetImageHeight(pBitmap)
+    if (width < 100 || height < 100)
+        return ""
+
+    dir := LabMapCameraDir()
+    target := dir "\" entry.key ".jpg"
+    temp := dir "\." entry.key "." A_TickCount ".tmp.jpg"
+    if FileExist(temp)
+        try FileDelete(temp)
+
+    try {
+        ; JPEG 86 keeps text/terrain crisp enough for a placement canvas while making
+        ; the persistent map library dramatically smaller than full-resolution PNG.
+        Gdip_SaveBitmapToFile(pBitmap, temp, 86)
+        if !FileExist(temp) || FileGetSize(temp) < 1000 || !LabMapImageUsable(temp)
+            throw Error("Encoded camera screenshot is not usable.")
+
+        ; Critical ordering: the renderer may hold the old target decoded. Releasing
+        ; that bitmap BEFORE replacement avoids Windows ERROR_SHARING_VIOLATION/
+        ; generic FileCopy failures when an editor is open during auto-capture.
+        LabMapReleaseRenderCache()
+        LabMapRemoveCameraVariants(entry.key)
+        FileMove(temp, target, 1)
+        if !LabMapImageUsable(target)
+            throw Error("Final camera screenshot is not usable.")
+
+        LabMapWriteCameraMeta(mapName, stage, width, height)
+        return target
+    } catch {
+        return ""
+    } finally {
+        if FileExist(temp)
+            try FileDelete(temp)
+    }
+}
+
+; Compatibility path for the manual Capture Map button and older callers.
+LabMapSaveCameraCapture(mapName, sourcePath, stage := "manual") {
+    if (sourcePath = "" || !FileExist(sourcePath))
+        return ""
+    pBitmap := 0
+    try {
+        pBitmap := Gdip_CreateBitmapFromFile(sourcePath)
+        if !pBitmap
+            return ""
+        return LabMapSaveCameraBitmap(mapName, pBitmap, stage)
+    } catch {
+        return ""
+    } finally {
+        if pBitmap
+            try Gdip_DisposeImage(pBitmap)
+    }
 }
 
 LabMapInvalidateRenderCache(path := "") {
@@ -267,6 +367,9 @@ class LabMapViewport {
     }
 }
 
+; Retained for callers outside the live Editor. The editor itself renders directly to
+; an in-memory HBITMAP in StrategyEditorMaps.ahk and therefore does not use this helper
+; while dragging/panning.
 LabMapRenderViewport(sourcePath, viewport, outputPath, width, height) {
     pSource := LabMapAcquireRenderBitmap(sourcePath, &sourceW, &sourceH)
     if !pSource || sourceW <= 0 || sourceH <= 0
@@ -284,8 +387,6 @@ LabMapRenderViewport(sourcePath, viewport, outputPath, width, height) {
             return false
         DllCall("gdiplus\GdipSetInterpolationMode", "Ptr", graphics, "Int", 7)
         Gdip_DrawImage(graphics, pSource, 0, 0, width, height, rect.x, rect.y, rect.w, rect.h)
-        ; The live viewport is transient. JPEG 84 is visually clean at editor size and
-        ; much cheaper to encode/write than the old PNG frame path.
         Gdip_SaveBitmapToFile(pOut, outputPath, 84)
         return FileExist(outputPath)
     } finally {
@@ -293,6 +394,5 @@ LabMapRenderViewport(sourcePath, viewport, outputPath, width, height) {
             try Gdip_DeleteGraphics(graphics)
         if pOut
             try Gdip_DisposeImage(pOut)
-        ; pSource belongs to LabMapRenderCache and stays decoded for the next frame.
     }
 }
