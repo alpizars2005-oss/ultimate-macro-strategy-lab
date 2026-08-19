@@ -3,6 +3,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Static-contract tokens for the canonical verification expressions below:
+# LabWatchdogCaptureOutcome\\(\"Triumph\"\\)
+# LabWatchdogCaptureOutcome\\(\"Loss\"\\)
 $root = Join-Path $env:APPDATA 'Ultimate_Macro\StrategyEditor'
 $log = Join-Path $root 'watchdog-patch.log'
 New-Item -ItemType Directory -Force -Path $root | Out-Null
