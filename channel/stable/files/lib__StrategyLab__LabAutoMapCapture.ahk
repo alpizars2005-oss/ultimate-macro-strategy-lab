@@ -1,11 +1,13 @@
 #Requires AutoHotkey v2.0
 
-; One-shot exact-map capture for the screenshot-only editor.
+; Exact-map capture for the screenshot-only editor.
 ;
-; SpawnTower never performs capture/focus/GDI/file work inline. The compatibility hook
-; schedules this worker and immediately returns to the original macro. 0.4.6 fixes the
-; important coordinate bug: GetClientRect gives size but NOT screen x/y, so screenshots
-; now use WinGetClientPos through LabMapGetRobloxClientRect().
+; 0.4.7 adds a pristine synchronous capture point immediately after LoadGame() returns.
+; At that boundary AlignCamera() and its settle/timescale work are complete, while the
+; strategy has not begun iterating RecordedSteps yet, so no placed tower can contaminate
+; the map reference. The older deferred entry point remains for compatibility/migration.
+; 0.4.6 fixed the coordinate bug by using WinGetClientPos through
+; LabMapGetRobloxClientRect() instead of assuming the client begins at screen 0,0.
 
 global LabAutoMapCaptureBusy := false
 global LabAutoMapCaptureScheduled := false
@@ -30,6 +32,39 @@ LabAutoMapStrategyRunning() {
         return false
 }
 
+; Canonical 0.4.7 entry point. This intentionally performs the capture inline because
+; RunStrategy has not started step 1 yet. A short GDI/file operation here is safer than
+; deferring the work and risking a tower being placed before the screenshot is taken.
+LabMapAutoCaptureAligned(*) {
+    global gamemap, LabAutoMapCaptureScheduled, LabAutoMapCaptureRetry
+
+    if !LabAutoMapStrategyRunning() || !IsSet(gamemap)
+        return ""
+
+    name := Trim(String(gamemap))
+    if (name = "")
+        return ""
+
+    LabAutoMapCaptureScheduled := false
+    LabAutoMapCaptureRetry := 0
+
+    cached := LabMapCameraPath(name)
+    if (cached != "" && !LabMapCameraNeedsRefresh(name))
+        return cached
+
+    if !WinActive("ahk_exe RobloxPlayerBeta.exe") {
+        LabAutoMapCaptureLog("Skipped aligned capture because Roblox was not foreground: " name)
+        return ""
+    }
+
+    result := LabMapAutoCaptureIfMissing(name)
+    if (result != "")
+        LabAutoMapCaptureLog("Pristine post-LoadGame capture confirmed before strategy step 1: " name)
+    return result
+}
+
+; Legacy/deferred entry point retained so older patched Main_Lab files fail safely while
+; preflight migrates their hook away from SpawnTower on the next launch.
 LabMapAutoCaptureCurrent(*) {
     global gamemap, LabAutoMapCaptureScheduled, LabAutoMapCaptureRetry
 

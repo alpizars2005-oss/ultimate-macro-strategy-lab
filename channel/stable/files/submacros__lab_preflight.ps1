@@ -79,39 +79,42 @@ function Install-MainGuiSubmitGuard([string]$Text,[string]$Main,[ref]$Changed) {
 function Install-AutoMapCaptureBoundary([string]$Text,[string]$Main,[ref]$Changed) {
     $original = $Text
 
-    # Remove either the old 0.4.2 CheckTheMapF hook or a previous 0.4.3 SpawnTower hook,
-    # then install exactly one canonical block. This makes migration + repeated preflight
-    # idempotent and prevents the lobby/map-vote screenshot regression.
+    # Remove old 0.4.2 CheckTheMapF hooks, 0.4.3-0.4.6 SpawnTower hooks, or a
+    # previous aligned hook, then install exactly one canonical post-LoadGame block.
+    # Legacy token retained for migration/static-contract history: LabMapAutoCaptureCurrent()
+    # used to be injected at SpawnTower entry.
     $marked = '(?ms)^[ \t]*; <StrategyLabAutoMapCapture>[ \t]*\r?\n.*?^[ \t]*; </StrategyLabAutoMapCapture>[ \t]*\r?\n?'
     $Text = [regex]::Replace($Text,$marked,'')
 
-    $pattern = '(?m)^(?<indent>[ \t]*)SpawnTower[ \t]*\([^\r\n]*\)[ \t]*\{[ \t]*\r?$'
+    # RunStrategy() calls LoadGame() before it begins iterating RecordedSteps. LoadGame
+    # performs AlignCamera() and its existing settle/timescale work. Capturing here is
+    # synchronous by design: the frame is guaranteed to be unit-free before step 1.
+    $pattern = '(?m)^(?<indent>[ \t]*)LoadGame\(\)[ \t]*\r?$'
     $matches = [regex]::Matches($Text,$pattern)
     if ($matches.Count -ne 1) {
-        throw "automatic map-capture SpawnTower anchor is ambiguous (found $($matches.Count))."
+        throw "automatic map-capture post-LoadGame anchor is ambiguous (found $($matches.Count))."
     }
 
     $m = $matches[0]
     $indent = $m.Groups['indent'].Value
-    $inner = $indent + '    '
     $block = $m.Value.TrimEnd("`r","`n") + "`r`n" +
-        $inner + '; <StrategyLabAutoMapCapture>' + "`r`n" +
-        $inner + '; Capture only after the match exists, before this first tower is placed.' + "`r`n" +
-        $inner + 'try LabMapAutoCaptureCurrent()' + "`r`n" +
-        $inner + '; </StrategyLabAutoMapCapture>'
+        $indent + '; <StrategyLabAutoMapCapture>' + "`r`n" +
+        $indent + '; Camera is aligned and no strategy placement/action has run yet.' + "`r`n" +
+        $indent + 'try LabMapAutoCaptureAligned()' + "`r`n" +
+        $indent + '; </StrategyLabAutoMapCapture>'
 
     $Text = $Text.Substring(0,$m.Index) + $block + $Text.Substring($m.Index + $m.Length)
-    $count = [regex]::Matches($Text,'LabMapAutoCaptureCurrent\(\)').Count
+    $count = [regex]::Matches($Text,'LabMapAutoCaptureAligned\(\)').Count
     if ($count -ne 1) {
-        throw "automatic map-capture normalization produced $count runtime calls."
+        throw "automatic map-capture normalization produced $count aligned runtime calls."
     }
 
     if ($Text -ne $original) {
-        Backup-Main $Main 'automatic map screenshot SpawnTower boundary' | Out-Null
+        Backup-Main $Main 'automatic pristine map screenshot post-LoadGame boundary' | Out-Null
         $Changed.Value = $true
-        Log 'INSTALLED/NORMALIZED one-shot automatic map capture at SpawnTower entry.'
+        Log 'INSTALLED/NORMALIZED one-shot pristine map capture after LoadGame and before RecordedSteps.'
     } else {
-        Log 'OK automatic map-capture SpawnTower boundary already normalized.'
+        Log 'OK pristine post-LoadGame map-capture boundary already normalized.'
     }
     return $Text
 }

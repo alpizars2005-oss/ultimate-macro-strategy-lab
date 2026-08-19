@@ -41,8 +41,8 @@ try {
     $preflightTarget = Join-Path $root 'submacros\lab_preflight.ps1'
     Copy-Item -LiteralPath $preflightSource -Destination $preflightTarget -Force
 
-    # Start from the old 0.4.2 hook position so this also proves migration removes the
-    # lobby-stage capture and reinstalls the marker inside SpawnTower exactly once.
+    # Start from the old 0.4.2 lobby-stage hook so this proves migration removes it
+    # and installs the canonical capture after LoadGame(), before RecordedSteps begin.
     $fixture = @'
 #Requires AutoHotkey v2.0
 
@@ -62,6 +62,19 @@ RunStrategy() {
         try LabMapAutoCaptureIfMissing(gamemap)
         ; </StrategyLabAutoMapCapture>
     }
+
+    LoadGame()
+
+    i := 1
+    while (i <= RecordedSteps.Length) {
+        step := RecordedSteps[i]
+        i += 1
+    }
+}
+
+LoadGame() {
+    AlignCamera()
+    Sleep(500)
 }
 
 SpawnTower(X, Y, slotNumber, towerID) {
@@ -91,7 +104,7 @@ SpawnTower(X, Y, slotNumber, towerID) {
         'try labMainHwnd := MainGui.Hwnd',
         'DllCall("user32\IsWindow", "Ptr", labMainHwnd, "Int")',
         '; <StrategyLabAutoMapCapture>',
-        'try LabMapAutoCaptureCurrent()',
+        'try LabMapAutoCaptureAligned()',
         '; <StrategyLabRemoteBoundary>'
     )
     foreach ($needle in $checks) {
@@ -103,11 +116,22 @@ SpawnTower(X, Y, slotNumber, towerID) {
     if ($patched.Contains('LabMapAutoCaptureIfMissing(gamemap)')) {
         throw 'legacy CheckTheMapF/lobby capture call remained after migration'
     }
+    if ($patched.Contains('try LabMapAutoCaptureCurrent()')) {
+        throw 'legacy SpawnTower deferred capture remained after migration'
+    }
 
+    $loadGamePos = $patched.IndexOf('LoadGame()')
+    $capturePos = $patched.IndexOf('try LabMapAutoCaptureAligned()')
+    $firstStepPos = $patched.IndexOf('i := 1')
     $spawnPos = $patched.IndexOf('SpawnTower(X, Y, slotNumber, towerID)')
-    $capturePos = $patched.IndexOf('try LabMapAutoCaptureCurrent()')
-    if ($spawnPos -lt 0 -or $capturePos -lt $spawnPos) {
-        throw 'automatic capture is not installed inside SpawnTower'
+    if ($loadGamePos -lt 0 -or $capturePos -le $loadGamePos) {
+        throw 'automatic capture is not installed after the RunStrategy LoadGame call'
+    }
+    if ($firstStepPos -lt 0 -or $capturePos -ge $firstStepPos) {
+        throw 'automatic capture does not occur before RecordedSteps begin'
+    }
+    if ($spawnPos -lt 0 -or $capturePos -ge $spawnPos) {
+        throw 'automatic capture unexpectedly occurs at/after SpawnTower'
     }
 
     foreach ($marker in @('; <StrategyLabMainGuiGuard>','; <StrategyLabAutoMapCapture>','; <StrategyLabRemoteBoundary>')) {
@@ -117,7 +141,7 @@ SpawnTower(X, Y, slotNumber, towerID) {
         }
     }
 
-    Write-Host 'PASS: preflight migrates capture to SpawnTower and keeps all hooks idempotent.' -ForegroundColor Green
+    Write-Host 'PASS: preflight migrates capture to the pristine post-LoadGame boundary and keeps all hooks idempotent.' -ForegroundColor Green
 }
 finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
