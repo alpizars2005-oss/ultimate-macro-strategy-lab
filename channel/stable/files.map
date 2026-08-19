@@ -1,4 +1,4 @@
-# Strategy Lab stable delivery map 0.4.0 single-canvas editor rewrite
+# Strategy Lab stable delivery map 0.4.2 runtime guard + automatic map capture
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 run_lab.bat|channel/stable/files/run_lab.bat|raw
@@ -17,6 +17,7 @@ lib/StrategyLab/StrategyEditorInteraction.ahk|channel/stable/files/lib__Strategy
 lib/StrategyLab/StrategyEditorWorkspace.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorWorkspace.ahk|raw
 lib/StrategyLab/StrategyCalibration.ahk|channel/stable/files/lib__StrategyLab__StrategyCalibration.ahk|raw
 lib/StrategyLab/MapLibrary.ahk|channel/stable/files/lib__StrategyLab__MapLibrary.ahk|raw
+lib/StrategyLab/LabAutoMapCapture.ahk|channel/stable/files/lib__StrategyLab__LabAutoMapCapture.ahk|raw
 lib/StrategyLab/TowerCatalog.ahk|channel/stable/files/lib__StrategyLab__TowerCatalog.ahk|raw
 lib/StrategyLab/LabRewardCatalog.ahk|channel/stable/files/lib__StrategyLab__LabRewardCatalog.ahk|raw
 lib/StrategyLab/LabRewardTracker.ahk|channel/stable/files/lib__StrategyLab__LabRewardTracker.ahk|raw

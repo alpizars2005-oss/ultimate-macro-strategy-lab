@@ -1,0 +1,70 @@
+name: Strategy Lab preflight runtime patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'channel/stable/files/submacros__lab_preflight.ps1'
+      - 'channel/stable/files/lib__StrategyLab__LabAutoMapCapture.ahk'
+      - 'tests/preflight_runtime_patch_test.ps1'
+      - 'tests/auto_map_capture_compile_test.ahk'
+      - '.github/workflows/preflight-runtime-patch.yml'
+  pull_request:
+    paths:
+      - 'channel/stable/files/submacros__lab_preflight.ps1'
+      - 'channel/stable/files/lib__StrategyLab__LabAutoMapCapture.ahk'
+      - 'tests/preflight_runtime_patch_test.ps1'
+      - 'tests/auto_map_capture_compile_test.ahk'
+      - '.github/workflows/preflight-runtime-patch.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  generated-main-hooks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate preflight patch idempotency
+        shell: powershell
+        run: |
+          & .\tests\preflight_runtime_patch_test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Validate automatic map capture dependency contract
+        shell: powershell
+        run: |
+          $url = 'https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.19/AutoHotkey_2.0.19.zip'
+          Invoke-WebRequest -Uri $url -OutFile ahk.zip
+          Expand-Archive -Path ahk.zip -DestinationPath ahk -Force
+          $exe = Get-ChildItem -Path ahk -Recurse -Filter AutoHotkey64.exe | Select-Object -First 1
+          if (!$exe) { throw 'AutoHotkey64.exe not found.' }
+
+          $script = (Resolve-Path '.\tests\auto_map_capture_compile_test.ahk').Path
+          $psi = New-Object Diagnostics.ProcessStartInfo
+          $psi.FileName = $exe.FullName
+          $psi.Arguments = '/Validate /ErrorStdOut=UTF-8 "' + $script + '"'
+          $psi.WorkingDirectory = (Get-Location).Path
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+
+          $proc = New-Object Diagnostics.Process
+          $proc.StartInfo = $psi
+          if (!$proc.Start()) { throw 'Could not launch AutoHotkey validator.' }
+          $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+          $stderrTask = $proc.StandardError.ReadToEndAsync()
+          if (!$proc.WaitForExit(30000)) {
+            try { $proc.Kill() } catch {}
+            throw 'Auto-map capture AHK validation timed out.'
+          }
+
+          $stdout = $stdoutTask.GetAwaiter().GetResult()
+          $stderr = $stderrTask.GetAwaiter().GetResult()
+          if ($stdout) { Write-Host $stdout }
+          if ($stderr) { Write-Host $stderr }
+          if ($proc.ExitCode -ne 0 -or (($stdout + $stderr) -match '(?im)^Error:')) {
+            throw "Auto-map capture AHK dependency validation failed with exit code $($proc.ExitCode)."
+          }
