@@ -178,7 +178,7 @@ function Verify-LabModules([string]$InstallRoot) {
     $required = @(
         'lib\StrategyLab\StrategyEditorTab.ahk',
         'lib\StrategyLab\StrategyEditorPlacements.ahk',
-        'lib\StrategyLab\StrategyEditorMaps.ahk',
+        'lib\StrategyLab\StrategyEditorMaps046.ahk',
         'lib\StrategyLab\StrategyEditorInteraction.ahk',
         'lib\StrategyLab\MapLibrary.ahk',
         'lib\StrategyLab\LabAutoMapCapture.ahk',
@@ -201,7 +201,7 @@ function Verify-LabModules([string]$InstallRoot) {
         if (!(Test-Path -LiteralPath (Join-Path $InstallRoot $relative) -PathType Leaf)) { $missing += $relative }
     }
     if ($missing.Count -gt 0) { throw ('Required Strategy Lab modules are missing: ' + ($missing -join ', ')) }
-    Log 'OK Strategy Lab 0.4.3 required module set present.'
+    Log 'OK Strategy Lab required module set present.'
 }
 
 try {
