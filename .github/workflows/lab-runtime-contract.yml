@@ -8,8 +8,7 @@ on:
       - 'channel/stable/files.map'
       - 'tools/repair_strategy_lab.ps1'
       - 'tools/install_clean_strategy_lab.ps1'
-      - 'tests/ahk_contract_harness.ahk'
-      - 'tests/strategy_encoding_test.ahk'
+      - 'tests/**'
       - '.github/workflows/lab-runtime-contract.yml'
   pull_request:
     paths:
@@ -17,8 +16,7 @@ on:
       - 'channel/stable/files.map'
       - 'tools/repair_strategy_lab.ps1'
       - 'tools/install_clean_strategy_lab.ps1'
-      - 'tests/ahk_contract_harness.ahk'
-      - 'tests/strategy_encoding_test.ahk'
+      - 'tests/**'
       - '.github/workflows/lab-runtime-contract.yml'
 
 permissions:
@@ -30,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Enforce Strategy Lab 0.4.6 architecture
+      - name: Enforce Strategy Lab 0.4.9 architecture
         shell: python
         run: |
           from pathlib import Path
@@ -123,8 +121,9 @@ jobs:
           assert 'LabEditorTowerPortrait := gui.Add("Picture"' in ui
 
           assert 'LabMapSaveCameraBitmap(name, pBitmap, "spawn")' in auto_capture
-          assert 'LabMapAutoCaptureCurrent()' in preflight
-          assert 'SpawnTower' in preflight
+          assert 'LabMapAutoCaptureAligned()' in preflight
+          assert 'pre-activateTimescale' in preflight
+          assert 'post-LoadGame anchor' not in preflight
           assert 'LabMapAutoCaptureIfMissing(gamemap)' not in preflight
 
           assert 'LabEditorControlAlive' in stability and 'user32\\IsWindow' in stability

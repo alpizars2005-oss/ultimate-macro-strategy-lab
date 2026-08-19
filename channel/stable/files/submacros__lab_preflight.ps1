@@ -79,29 +79,29 @@ function Install-MainGuiSubmitGuard([string]$Text,[string]$Main,[ref]$Changed) {
 function Install-AutoMapCaptureBoundary([string]$Text,[string]$Main,[ref]$Changed) {
     $original = $Text
 
-    # Remove old 0.4.2 CheckTheMapF hooks, 0.4.3-0.4.6 SpawnTower hooks, or a
-    # previous aligned hook, then install exactly one canonical post-LoadGame block.
-    # Legacy token retained for migration/static-contract history: LabMapAutoCaptureCurrent()
-    # used to be injected at SpawnTower entry.
+    # Remove every legacy Strategy Lab map-capture block before normalizing one
+    # canonical boundary against the REAL Ultimate Macro RunStrategy flow.
     $marked = '(?ms)^[ \t]*; <StrategyLabAutoMapCapture>[ \t]*\r?\n.*?^[ \t]*; </StrategyLabAutoMapCapture>[ \t]*\r?\n?'
     $Text = [regex]::Replace($Text,$marked,'')
 
-    # RunStrategy() calls LoadGame() before it begins iterating RecordedSteps. LoadGame
-    # performs AlignCamera() and its existing settle/timescale work. Capturing here is
-    # synchronous by design: the frame is guaranteed to be unit-free before step 1.
-    $pattern = '(?m)^(?<indent>[ \t]*)LoadGame\(\)[ \t]*\r?$'
+    # Ultimate Macro's actual RunStrategy ordering is:
+    #   waitReady -> AlignCamera (normal maps) -> CheckTheMapF -> activateTimescale
+    #   -> ClickReady -> PlayStrategy -> RecordedSteps/SpawnTower.
+    # Capturing immediately BEFORE activateTimescale is synchronous and guarantees the
+    # camera/map checks have finished while no strategy placement has run yet.
+    $pattern = '(?m)^(?<indent>[ \t]*)activateTimescale\(\)[ \t]*\r?$'
     $matches = [regex]::Matches($Text,$pattern)
     if ($matches.Count -ne 1) {
-        throw "automatic map-capture post-LoadGame anchor is ambiguous (found $($matches.Count))."
+        throw "automatic map-capture pre-activateTimescale anchor is ambiguous (found $($matches.Count))."
     }
 
     $m = $matches[0]
     $indent = $m.Groups['indent'].Value
-    $block = $m.Value.TrimEnd("`r","`n") + "`r`n" +
-        $indent + '; <StrategyLabAutoMapCapture>' + "`r`n" +
-        $indent + '; Camera is aligned and no strategy placement/action has run yet.' + "`r`n" +
+    $block = $indent + '; <StrategyLabAutoMapCapture>' + "`r`n" +
+        $indent + '; Camera/map verification has finished; ClickReady/PlayStrategy have not run.' + "`r`n" +
         $indent + 'try LabMapAutoCaptureAligned()' + "`r`n" +
-        $indent + '; </StrategyLabAutoMapCapture>'
+        $indent + '; </StrategyLabAutoMapCapture>' + "`r`n" +
+        $m.Value.TrimEnd("`r","`n")
 
     $Text = $Text.Substring(0,$m.Index) + $block + $Text.Substring($m.Index + $m.Length)
     $count = [regex]::Matches($Text,'LabMapAutoCaptureAligned\(\)').Count
@@ -110,11 +110,11 @@ function Install-AutoMapCaptureBoundary([string]$Text,[string]$Main,[ref]$Change
     }
 
     if ($Text -ne $original) {
-        Backup-Main $Main 'automatic pristine map screenshot post-LoadGame boundary' | Out-Null
+        Backup-Main $Main 'automatic pristine map screenshot before activateTimescale' | Out-Null
         $Changed.Value = $true
-        Log 'INSTALLED/NORMALIZED one-shot pristine map capture after LoadGame and before RecordedSteps.'
+        Log 'INSTALLED/NORMALIZED pristine map capture after camera/map verification and before activateTimescale/ClickReady/PlayStrategy.'
     } else {
-        Log 'OK pristine post-LoadGame map-capture boundary already normalized.'
+        Log 'OK pristine pre-activateTimescale map-capture boundary already normalized.'
     }
     return $Text
 }
@@ -238,6 +238,9 @@ try {
 
     exit 0
 } catch {
-    Log ('ERROR preflight exception: ' + $_.Exception.Message)
+    $message = 'ERROR preflight exception: ' + $_.Exception.Message
+    Log $message
+    Write-Host $message -ForegroundColor Red
+    Write-Host ("Preflight log: {0}" -f $logPath) -ForegroundColor Yellow
     exit 10
 }
