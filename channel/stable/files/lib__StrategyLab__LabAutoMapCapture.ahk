@@ -120,7 +120,9 @@ LabMapAutoCaptureIfMissing(mapName) {
         if !pBitmap
             throw Error("GDI+ could not capture Roblox.")
 
-        saved := LabMapSaveCameraBitmap(name, pBitmap, "runtime-deferred")
+        ; Keep the historical stage token "spawn" for cache migration/contract
+        ; compatibility; the actual capture work is deferred well after SpawnTower entry.
+        saved := LabMapSaveCameraBitmap(name, pBitmap, "spawn")
         if (saved = "")
             throw Error("MapLibrary rejected the captured screenshot.")
 
