@@ -34,7 +34,6 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import base64
 
           stable = Path('channel/stable/files')
           ahk = '\n'.join(p.read_text(encoding='utf-8-sig') for p in stable.glob('*.ahk'))
@@ -46,6 +45,9 @@ jobs:
           remote = (stable / 'lib__StrategyLab__LabRemoteGate.ahk').read_text(encoding='utf-8-sig')
           footprints = (stable / 'lib__StrategyLab__LabSimpleFootprints.ahk').read_text(encoding='utf-8-sig')
           placements = (stable / 'lib__StrategyLab__StrategyEditorPlacements.ahk').read_text(encoding='utf-8-sig')
+          interaction = (stable / 'lib__StrategyLab__StrategyEditorInteraction.ahk').read_text(encoding='utf-8-sig')
+          workspace = (stable / 'lib__StrategyLab__StrategyEditorWorkspace.ahk').read_text(encoding='utf-8-sig')
+          stability = (stable / 'lib__StrategyLab__LabEditorStability.ahk').read_text(encoding='utf-8-sig')
           reward_catalog = (stable / 'lib__StrategyLab__LabRewardCatalog.ahk').read_text(encoding='utf-8-sig')
           reward_tracker = (stable / 'lib__StrategyLab__LabRewardTracker.ahk').read_text(encoding='utf-8-sig')
           stats = (stable / 'lib__StrategyLab__LabStatsTab.ahk').read_text(encoding='utf-8-sig')
@@ -60,21 +62,31 @@ jobs:
           assert 'FileRead(path, "RAW")' in validation
           assert 'LabStrategyTrimTerminalNuls' in validation
 
-          # Editor 0.3.9 contract: visibility is owned by the Editor canvas, not by
-          # upstream tab numbering. Marker and footprint remain separate HWNDs.
           assert 'global LabEditorMarkerCtrls, CurrentTab' not in placements
           assert 'CurrentTab =' not in placements
           assert 'StrategyEditorIsActive()' in placements
           assert 'showPlacement := editorActive && point.visible' in placements
-          assert 'LabEditorRingMode := "selected"' in placements
-          assert 'return "Footprint: 1"' in placements
           assert 'StrategyEditorResolveLayerSelection' in placements
           assert 'LabEditorLayerCtrl.Text' in placements
-          assert 'Resources\\StrategyLab\\Towers\\footprint-guide.png' in placements
-          assert 'placement-footprint-ring.png' not in placements
-          assert 'GdipDrawEllipse' not in placements
 
-          # Portrait helper may replace the single marker HWND, but must not own rings.
+          # 0.3.11 lifecycle contract: native HWND liveness is authoritative. No timer
+          # may use CanvasBg/Snapshot .Visible as its activity sentinel directly.
+          assert 'LabEditorControlAlive' in stability
+          assert 'user32\\IsWindow' in stability
+          assert 'LabEditorLifecycleExit' in stability
+          assert 'SetTimer(StrategyEditorWorkspaceMonitor, 0)' in stability
+          assert 'return LabEditorControlVisible(LabEditorCanvasBg) || LabEditorControlVisible(LabEditorSnapshot)' in interaction
+          assert 'LabEditorControlVisible(LabEditorCanvasBg) || LabEditorControlVisible(LabEditorSnapshot)' in workspace
+          assert 'LabEditorCanvasBg.Visible || LabEditorSnapshot.Visible' not in workspace
+          assert 'lib/StrategyLab/LabEditorStability.ahk|' in mapping
+
+          # Retire the sibling Picture footprint overlay until it is composited into
+          # the map frame. This removes the black/square transparency corruption path.
+          assert 'Resources/StrategyLab/Towers/footprint-guide.png|' not in mapping
+          assert 'FileDelete(legacy)' in stability
+          assert 'LabEditorRingMode := "off"' in stability
+
+          # Unique portrait helper remains one marker HWND replacing one marker HWND.
           assert 'LabSimpleFootprintsUpgradeUniqueMarker' in footprints
           assert 'DestroyWindow' in footprints
           assert 'entry.ring.Value' not in footprints
@@ -85,17 +97,11 @@ jobs:
           assert 'lib/StrategyLab/LabRewardTracker.ahk|' in mapping
           assert 'submacros/lab_reward_assets.ps1|' in mapping
           assert 'Resources/StrategyLab/Rewards/catalog.ini|' in mapping
-          assert 'Resources/StrategyLab/Towers/footprint-guide.png|' in mapping
           assert 'LabStatsCreateTab' in stats and 'LabStatsShow' in stats
           assert 'SetTimer(LabRewardMaybeSyncAssets, -6000)' in reward_catalog
           assert 'special_drops":[]' in reward_tracker
           for required in ['[Coin]','[Gem]','[Experience]','[Spin Ticket]','[Revive Ticket]','[Time Scale Ticket]']:
               assert required in rewards_ini
-
-          guide_b64 = (stable / 'Resources__StrategyLab__Towers__footprint-guide.png.b64').read_text().strip()
-          guide = base64.b64decode(guide_b64, validate=True)
-          assert guide.startswith(b'\x89PNG\r\n\x1a\n')
-          assert len(guide) > 500
 
           assert 'lab_syntax_probe.ps1' in launcher
           assert 'lab_syntax_probe.ps1' in updater and 'Restore-AppliedFiles' in updater
