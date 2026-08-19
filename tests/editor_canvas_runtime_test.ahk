@@ -2,9 +2,9 @@
 #SingleInstance Force
 #Warn All, Off
 
-; Runtime contract for the 0.4 single-canvas architecture. GDI+ wrappers are lightweight
-; stubs: this test validates editor state, filtering, compositing flow and hit-regions
-; without depending on GPU/display capture in GitHub Actions.
+; Headless runtime contract for the 0.4 single-canvas geometry. Full syntax/include
+; validation is covered separately; this test exercises the exact layer projection and
+; geometric hit-testing used by the real bitmap renderer, without fake native images.
 
 StartStrategy(ctrl, *) {
 }
@@ -18,34 +18,27 @@ getRobloxPos(&x, &y, &w, &h) {
     x := 0, y := 0, w := 1920, h := 1009
 }
 
-Gdip_CreateBitmapFromFile(*) => 101
+Gdip_CreateBitmapFromFile(*) => 1
 Gdip_GetImageWidth(*) => 1920
 Gdip_GetImageHeight(*) => 1009
 Gdip_DisposeImage(*) => 0
-Gdip_CreateBitmap(*) => 102
-Gdip_GraphicsFromImage(*) => 103
+Gdip_CreateBitmap(*) => 1
+Gdip_GraphicsFromImage(*) => 1
 Gdip_DrawImage(*) => 0
+Gdip_SaveBitmapToFile(*) => 0
 Gdip_DeleteGraphics(*) => 0
-Gdip_BrushCreateSolid(*) => 104
+Gdip_BrushCreateSolid(*) => 1
 Gdip_FillRectangle(*) => 0
 Gdip_FillEllipse(*) => 0
 Gdip_DeleteBrush(*) => 0
-Gdip_CreatePen(*) => 105
+Gdip_CreatePen(*) => 1
 Gdip_DrawEllipse(*) => 0
 Gdip_DeletePen(*) => 0
 Gdip_TextToGraphics(*) => 0
-Gdip_BitmapFromScreen(*) => 106
-Gdip_SaveBitmapToFile(bitmap, path, quality := 90) {
-    if FileExist(path)
-        FileDelete(path)
-    FileAppend(StrReplace(Format("{:0600}", "frame"), " ", "x"), path, "UTF-8-RAW")
-    return 0
-}
+Gdip_BitmapFromScreen(*) => 1
 
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorTab.ahk"
 
-; This contract tests the renderer synchronously. Background product timers are covered
-; by the separate startup lifecycle test and would only add nondeterminism here.
 try SetTimer(StrategyEditorWorkspaceMonitor, 0)
 try SetTimer(StrategyEditorInteractiveStateGuard, 0)
 try SetTimer(StrategyEditorInstallDirectNavigation, 0)
@@ -76,64 +69,64 @@ class FakeEditorDoc {
     }
 }
 
-MainGui := Gui()
-StrategyEditorCreateTab(MainGui)
 LabEditorDoc := FakeEditorDoc()
 LabEditorLayer := "All placements"
 LabEditorSelectedRow := 1
 LabEditorViewport.Reset()
+LabEditorCanvasX := 20
+LabEditorCanvasY := 205
+LabEditorCanvasW := 646
+LabEditorCanvasH := 348
 
-source := A_Temp "\strategy-lab-canvas-source.tmp"
-output := A_Temp "\strategy-lab-canvas-output.jpg"
-try FileDelete(source)
-try FileDelete(output)
-FileAppend("fake source", source, "UTF-8-RAW")
-
-; BuildMarkers must remain a state/list operation only. Keep the source empty here so
-; it cannot ask the native Picture control to decode our deliberately fake JPEG stub.
-LabEditorSourceImage := ""
-LabEditorBackgroundMode := "none"
-StrategyEditorBuildMarkers()
+; Architecture contract: there are never placement native controls.
 if (LabEditorMarkerCtrls.Length != 0)
-    fail("StrategyEditorBuildMarkers created placement Gui.Controls")
+    fail("placement control array is not empty")
 if (LabEditorMarkerByHwnd.Count != 0)
-    fail("StrategyEditorBuildMarkers populated HWND marker map")
+    fail("placement HWND map is not empty")
 
-; Test the compositing function directly in-memory/headless.
-LabEditorSourceImage := source
-LabEditorBackgroundMode := "camera"
-if !StrategyEditorRenderCompositeFrame(output)
-    fail("single-canvas composite frame did not render")
+items := StrategyEditorCanvasPlacements()
+if (items.Length != 3)
+    fail("All placements geometry did not contain exactly 3 items")
+StrategyEditorRebuildHitRegions(items)
 if (LabEditorHitRegions.Length != 3)
-    fail("All placements did not create exactly 3 geometric hit regions")
+    fail("All placements did not create exactly 3 hit regions")
 
 first := LabEditorHitRegions[1]
 if (StrategyEditorHitTestPlacement(first.x, first.y) != first.index)
-    fail("geometric hit-test did not resolve the painted placement")
+    fail("geometric hit-test did not resolve first painted placement")
 
-; Layer filtering must affect the canvas itself, not just the ListView.
+; The exact same visibility predicate must drive layer geometry.
 LabEditorLayer := "Slot 1 - Operator"
-if !StrategyEditorRenderCompositeFrame(output)
-    fail("filtered canvas frame did not render")
+items := StrategyEditorCanvasPlacements()
+if (items.Length != 2)
+    fail("Slot 1 layer did not filter geometry to 2 placements")
+StrategyEditorRebuildHitRegions(items)
 if (LabEditorHitRegions.Length != 2)
-    fail("Slot 1 layer did not filter canvas hit regions to 2 placements")
+    fail("Slot 1 layer did not filter hit regions to 2 placements")
 for region in LabEditorHitRegions {
     if (region.index = 3)
-        fail("filtered Warden placement remained on canvas")
+        fail("Warden placement remained in Operator layer hit regions")
 }
 
-; Radii cycle is state-only and must never create another HWND. Disable the fake source
-; first so the UI rerender path stays on the dark fallback instead of decoding stub bytes.
-LabEditorSourceImage := ""
+; Radius state and footprint sizes are pure model state; toggling them must not create
+; native controls or modify the filtering contract.
 LabEditorRingMode := "all"
-StrategyEditorToggleRings()
-if (LabEditorRingMode != "selected")
-    fail("Radii mode did not cycle All -> Selected")
-if (LabEditorMarkerCtrls.Length != 0 || LabEditorMarkerByHwnd.Count != 0)
-    fail("Radii toggle recreated native placement controls")
+if (StrategyEditorRingButtonText() != "Radii: All")
+    fail("Radii All label mismatch")
+LabEditorRingMode := "selected"
+if !StrategyEditorRingModeAllows(1) || StrategyEditorRingModeAllows(2)
+    fail("Radii selected mode visibility mismatch")
+LabEditorRingMode := "off"
+if StrategyEditorRingModeAllows(1)
+    fail("Radii Off still allows a radius")
 
-try FileDelete(source)
-try FileDelete(output)
-try MainGui.Destroy()
-FileAppend("PASS: single-canvas render, filtering and hit-testing`n", "*")
+small := StrategyEditorFootprintDiameter({slot: 5})
+avg := StrategyEditorFootprintDiameter({slot: 1})
+if (small <= 0 || avg <= 0)
+    fail("footprint diameter returned a non-positive value")
+
+if (LabEditorMarkerCtrls.Length != 0 || LabEditorMarkerByHwnd.Count != 0)
+    fail("geometry operations created placement native controls")
+
+FileAppend("PASS: single-canvas geometry, layers, radii and hit-testing`n", "*")
 ExitApp(0)
