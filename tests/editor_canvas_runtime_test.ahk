@@ -2,9 +2,9 @@
 #SingleInstance Force
 #Warn All, Off
 
-; Headless runtime contract for the 0.4 single-canvas geometry. Full syntax/include
-; validation is covered separately; this test exercises the exact layer projection and
-; geometric hit-testing used by the real bitmap renderer, without fake native images.
+; Headless runtime contract for the 0.4.3 single-canvas geometry. Full syntax/include
+; validation is covered separately; this test exercises layer projection, hit-testing,
+; calibrated placement footprint size and footprint collision detection.
 
 StartStrategy(ctrl, *) {
 }
@@ -78,7 +78,6 @@ LabEditorCanvasY := 205
 LabEditorCanvasW := 646
 LabEditorCanvasH := 348
 
-; Architecture contract: there are never placement native controls.
 if (LabEditorMarkerCtrls.Length != 0)
     fail("placement control array is not empty")
 if (LabEditorMarkerByHwnd.Count != 0)
@@ -95,7 +94,6 @@ first := LabEditorHitRegions[1]
 if (StrategyEditorHitTestPlacement(first.x, first.y) != first.index)
     fail("geometric hit-test did not resolve first painted placement")
 
-; The exact same visibility predicate must drive layer geometry.
 LabEditorLayer := "Slot 1 - Operator"
 items := StrategyEditorCanvasPlacements()
 if (items.Length != 2)
@@ -108,25 +106,42 @@ for region in LabEditorHitRegions {
         fail("Warden placement remained in Operator layer hit regions")
 }
 
-; Radius state and footprint sizes are pure model state; toggling them must not create
-; native controls or modify the filtering contract.
 LabEditorRingMode := "all"
-if (StrategyEditorRingButtonText() != "Radii: All")
-    fail("Radii All label mismatch")
+if (StrategyEditorRingButtonText() != "Footprints: All")
+    fail("Footprints All label mismatch")
 LabEditorRingMode := "selected"
 if !StrategyEditorRingModeAllows(1) || StrategyEditorRingModeAllows(2)
-    fail("Radii selected mode visibility mismatch")
+    fail("Footprints selected mode visibility mismatch")
 LabEditorRingMode := "off"
 if StrategyEditorRingModeAllows(1)
-    fail("Radii Off still allows a radius")
+    fail("Footprints Off still allows a footprint")
 
 small := StrategyEditorFootprintDiameter({slot: 5})
 avg := StrategyEditorFootprintDiameter({slot: 1})
-if (small <= 0 || avg <= 0)
-    fail("footprint diameter returned a non-positive value")
+if (small <= 0 || avg <= 0 || small >= avg)
+    fail("Small/Average footprint calibration ordering is invalid")
+; Average(1.5) at this 646x348 canvas should project to about 12px, not the old 28px+ halo.
+if (avg < 10 || avg > 14)
+    fail("Average footprint projection is not calibrated near 12px; got " avg)
+
+; Two Average footprints have 18px reference radii each. 25px center separation must
+; collide, while the original 140px separation does not.
+LabEditorDoc.Placements[2].x := 985
+LabEditorDoc.Placements[2].y := 504
+collisions := LabFootprintCollisionMap(LabEditorDoc)
+if !collisions.Has(1) || !collisions.Has(2)
+    fail("overlapping Average footprints were not detected")
+if collisions.Has(3)
+    fail("distant Warden was incorrectly marked as colliding")
+
+LabEditorDoc.Placements[2].x := 1100
+LabEditorDoc.Placements[2].y := 560
+collisions := LabFootprintCollisionMap(LabEditorDoc)
+if collisions.Has(1) || collisions.Has(2)
+    fail("separated Operator footprints remained colliding")
 
 if (LabEditorMarkerCtrls.Length != 0 || LabEditorMarkerByHwnd.Count != 0)
     fail("geometry operations created placement native controls")
 
-FileAppend("PASS: single-canvas geometry, layers, radii and hit-testing`n", "*")
+FileAppend("PASS: single-canvas layers, calibrated footprints, collisions and hit-testing`n", "*")
 ExitApp(0)
