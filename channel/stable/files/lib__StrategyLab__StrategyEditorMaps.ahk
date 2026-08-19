@@ -1,11 +1,16 @@
 #Requires AutoHotkey v2.0
 
+; Strategy Lab 0.4 map/canvas renderer.
+; The Editor uses only an exact Roblox/macro-camera screenshot (or a manually selected
+; screenshot) as its map source. No wiki/top-down map or tower portrait is required.
+; Placement radii + markers are composited into the SAME bitmap before Windows sees it.
+
 StrategyEditorLoadSnapshot(*) {
     path := FileSelect(1, , "Choose Roblox/TDS screenshot", "Images (*.png; *.jpg; *.jpeg; *.bmp)")
     if (path = "")
         return
     StrategyEditorSetBackground(path, "snapshot")
-    StrategyEditorSetStatus("Reference snapshot loaded. This screen-view image uses the strategy coordinate plane.")
+    StrategyEditorSetStatus("Screenshot loaded. Placements are drawn directly into this canvas.")
 }
 
 StrategyEditorCaptureRoblox(*) {
@@ -18,7 +23,8 @@ StrategyEditorCaptureRoblox(*) {
     pBitmap := 0
     captureError := ""
     capturePath := ""
-    MainGui.Hide()
+    if IsObject(MainGui)
+        try MainGui.Hide()
     try {
         Sleep(180)
         try WinActivate("ahk_exe RobloxPlayerBeta.exe")
@@ -36,14 +42,14 @@ StrategyEditorCaptureRoblox(*) {
         pBitmap := Gdip_BitmapFromScreen(pX "|" pY "|" w "|" h)
         if !pBitmap
             throw Error("Could not capture Roblox.")
-
         Gdip_SaveBitmapToFile(pBitmap, capturePath, 95)
     } catch Error as err {
         captureError := err.Message
     } finally {
         if pBitmap
             try Gdip_DisposeImage(pBitmap)
-        try MainGui.Show("NA")
+        if IsObject(MainGui)
+            try MainGui.Show("NA")
     }
 
     if (captureError != "") {
@@ -58,8 +64,9 @@ StrategyEditorCaptureRoblox(*) {
             capturePath := libraryPath
     }
     StrategyEditorSetBackground(capturePath, "camera")
-    LabEditorAssetBadge.Text := "Assets: exact camera map"
-    StrategyEditorSetStatus("Captured Roblox cleanly and saved the exact macro-camera view" (mapName != "" ? " for " mapName : "") ".")
+    if LabEditorControlAlive(LabEditorAssetBadge)
+        try LabEditorAssetBadge.Text := "Map source: exact screenshot"
+    StrategyEditorSetStatus("Captured the exact Roblox view used by the macro" (mapName != "" ? " for " mapName : "") ".")
 }
 
 StrategyEditorMapName() {
@@ -72,19 +79,19 @@ StrategyEditorMapName() {
 StrategyEditorBackgroundDescription() {
     global LabEditorBackgroundMode
     if (LabEditorBackgroundMode = "camera")
-        return "Exact camera map loaded."
-    if (LabEditorBackgroundMode = "reference")
-        return "Top-down reference loaded; Capture once to unlock exact drag alignment."
+        return "Exact macro-camera screenshot loaded."
     if (LabEditorBackgroundMode = "snapshot")
-        return "Reference snapshot loaded."
-    return "No tactical map cached yet."
+        return "Manual screenshot loaded."
+    return "Capture Roblox once on this map to create the editor canvas."
 }
 
 StrategyEditorClearBackground() {
-    global LabEditorSourceImage, LabEditorBackgroundMode, LabEditorSnapshot, LabEditorViewport
+    global LabEditorSourceImage, LabEditorBackgroundMode, LabEditorSnapshot, LabEditorViewport, LabEditorHitRegions
     LabEditorSourceImage := ""
     LabEditorBackgroundMode := "none"
-    LabEditorSnapshot.Value := ""
+    LabEditorHitRegions := []
+    if LabEditorControlAlive(LabEditorSnapshot)
+        try LabEditorSnapshot.Value := ""
     LabEditorViewport.Reset()
     StrategyEditorRenderBackground()
 }
@@ -93,19 +100,26 @@ StrategyEditorAutoLoadMap() {
     global LabEditorMapLabel, LabEditorCurrentMap, LabEditorAssetBadge
     mapName := StrategyEditorMapName()
     LabEditorCurrentMap := mapName
-    LabEditorMapLabel.Text := mapName != "" ? "Map: " mapName : "Map: unknown"
+    if LabEditorControlAlive(LabEditorMapLabel)
+        try LabEditorMapLabel.Text := mapName != "" ? "Map: " mapName : "Map: unknown"
+
     if (mapName = "") {
         StrategyEditorClearBackground()
-        LabEditorAssetBadge.Text := "Assets: map unknown"
+        if LabEditorControlAlive(LabEditorAssetBadge)
+            try LabEditorAssetBadge.Text := "Map source: unknown"
         return
     }
-    bg := LabMapPreferredBackground(mapName)
-    if (bg.path != "") {
-        StrategyEditorSetBackground(bg.path, bg.mode)
-        LabEditorAssetBadge.Text := bg.mode = "camera" ? "Assets: exact camera map" : "Assets: top-down reference"
+
+    ; Screenshot-only editor: never fall back to a wiki/top-down image.
+    camera := LabMapCameraPath(mapName)
+    if (camera != "") {
+        StrategyEditorSetBackground(camera, "camera")
+        if LabEditorControlAlive(LabEditorAssetBadge)
+            try LabEditorAssetBadge.Text := "Map source: exact screenshot"
     } else {
         StrategyEditorClearBackground()
-        LabEditorAssetBadge.Text := "Assets: syncing needed"
+        if LabEditorControlAlive(LabEditorAssetBadge)
+            try LabEditorAssetBadge.Text := "Map source: capture required"
     }
 }
 
@@ -120,56 +134,188 @@ StrategyEditorSetBackground(path, mode := "snapshot") {
     return true
 }
 
-; Rendering the bitmap and rebuilding the native ListView used to happen together.
-; Pan/zoom/layout changes only need marker repositioning, so the hot path now avoids
-; expensive row deletion/reinsertion and stays much closer to display refresh rate.
+StrategyEditorPreviewPlacement(index, placement) {
+    global LabEditorDragIndex, LabEditorDragPreviewX, LabEditorDragPreviewY
+    if (index = LabEditorDragIndex && LabEditorDragPreviewX != "" && LabEditorDragPreviewY != "")
+        return {x: LabEditorDragPreviewX, y: LabEditorDragPreviewY}
+    return {x: placement.x, y: placement.y}
+}
+
+StrategyEditorDrawPlacement(graphics, index, placement, point, fast := false) {
+    global LabEditorSelectedRow, LabEditorHitRegions
+
+    selected := index = LabEditorSelectedRow
+    markerDiameter := StrategyEditorMarkerDiameter(index)
+    markerRadius := markerDiameter / 2.0
+    slotColor := StrategyEditorSlotColor(placement.slot, 255)
+
+    if StrategyEditorRingModeAllows(index) {
+        footprintDiameter := StrategyEditorFootprintDiameter(placement)
+        footprintRadius := footprintDiameter / 2.0
+        ringAlpha := selected ? 220 : 105
+        fillAlpha := selected ? 34 : 14
+        ringColor := StrategyEditorSlotColor(placement.slot, ringAlpha)
+        fillColor := StrategyEditorSlotColor(placement.slot, fillAlpha)
+        pen := 0
+        brush := 0
+        try {
+            brush := Gdip_BrushCreateSolid(fillColor)
+            if brush
+                Gdip_FillEllipse(graphics, brush, point.x - footprintRadius, point.y - footprintRadius,
+                    footprintDiameter, footprintDiameter)
+            pen := Gdip_CreatePen(ringColor, selected ? 2.2 : 1.25)
+            if pen
+                Gdip_DrawEllipse(graphics, pen, point.x - footprintRadius, point.y - footprintRadius,
+                    footprintDiameter, footprintDiameter)
+        } finally {
+            if pen
+                try Gdip_DeletePen(pen)
+            if brush
+                try Gdip_DeleteBrush(brush)
+        }
+    }
+
+    ; Small center badge. It is painted into the frame, not a child control.
+    markerBrush := 0
+    outlinePen := 0
+    try {
+        markerBrush := Gdip_BrushCreateSolid(slotColor)
+        if markerBrush
+            Gdip_FillEllipse(graphics, markerBrush, point.x - markerRadius, point.y - markerRadius,
+                markerDiameter, markerDiameter)
+        outlinePen := Gdip_CreatePen(selected ? 0xFFFFFFFF : 0xCCF4F7FA, selected ? 2.0 : 1.0)
+        if outlinePen
+            Gdip_DrawEllipse(graphics, outlinePen, point.x - markerRadius, point.y - markerRadius,
+                markerDiameter, markerDiameter)
+    } finally {
+        if outlinePen
+            try Gdip_DeletePen(outlinePen)
+        if markerBrush
+            try Gdip_DeleteBrush(markerBrush)
+    }
+
+    ; During continuous pan/drag, skipping most text keeps redraws smooth. The selected
+    ; marker stays labelled; the final settled frame restores every number immediately.
+    if (!fast || selected) {
+        label := StrategyEditorMarkerLabel(placement)
+        size := selected ? 8 : 7
+        options := "x" (point.x - markerRadius) " y" (point.y - markerRadius - 1)
+            " w" markerDiameter " h" markerDiameter " Center vCenter cFFFFFFFF s" size " Bold"
+        try Gdip_TextToGraphics(graphics, label, options, "Segoe UI")
+    }
+
+    LabEditorHitRegions.Push({
+        index: index,
+        x: point.x + LabEditorCanvasX,
+        y: point.y + LabEditorCanvasY,
+        radius: Max(12, markerRadius + 5)
+    })
+}
+
+StrategyEditorRenderCompositeFrame(outputPath) {
+    global LabEditorSourceImage, LabEditorViewport, LabEditorCanvasW, LabEditorCanvasH
+    global LabEditorDoc, LabEditorHitRegions, LabEditorPanActive, LabEditorDragPlacement
+
+    LabEditorHitRegions := []
+    pSource := LabMapAcquireRenderBitmap(LabEditorSourceImage, &sourceW, &sourceH)
+    if !pSource || sourceW <= 0 || sourceH <= 0
+        return false
+
+    pOut := 0
+    graphics := 0
+    try {
+        rect := LabEditorViewport.SourceRect(sourceW, sourceH)
+        pOut := Gdip_CreateBitmap(LabEditorCanvasW, LabEditorCanvasH)
+        if !pOut
+            return false
+        graphics := Gdip_GraphicsFromImage(pOut)
+        if !graphics
+            return false
+
+        DllCall("gdiplus\GdipSetInterpolationMode", "Ptr", graphics, "Int", 7)
+        try DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", graphics, "Int", 4)
+        Gdip_DrawImage(graphics, pSource, 0, 0, LabEditorCanvasW, LabEditorCanvasH,
+            rect.x, rect.y, rect.w, rect.h)
+
+        fast := false
+        if IsSet(LabEditorPanActive)
+            fast := !!LabEditorPanActive
+        if IsObject(LabEditorDragPlacement)
+            fast := true
+
+        if IsObject(LabEditorDoc) {
+            for index, placement in LabEditorDoc.Placements {
+                if !StrategyEditorPlacementVisible(placement)
+                    continue
+                logical := StrategyEditorPreviewPlacement(index, placement)
+                point := LabEditorViewport.StrategyToViewport(
+                    logical.x, logical.y,
+                    LabEditorDoc.StrategyWidth, LabEditorDoc.StrategyHeight,
+                    LabEditorCanvasW, LabEditorCanvasH)
+                if !point.visible
+                    continue
+                StrategyEditorDrawPlacement(graphics, index, placement, point, fast)
+            }
+        }
+
+        Gdip_SaveBitmapToFile(pOut, outputPath, 90)
+        return FileExist(outputPath) && FileGetSize(outputPath) > 500
+    } finally {
+        if graphics
+            try Gdip_DeleteGraphics(graphics)
+        if pOut
+            try Gdip_DisposeImage(pOut)
+    }
+}
+
 StrategyEditorRenderBackground(repositionMarkers := true) {
-    global LabEditorSourceImage, LabEditorViewport, LabEditorViewportPath, LabEditorViewportAltPath, LabEditorViewportFrame
+    global LabEditorSourceImage, LabEditorViewportPath, LabEditorViewportAltPath, LabEditorViewportFrame
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
-    global LabEditorSnapshot, LabEditorCanvasBg, LabEditorCanvasHint, LabEditorZoomLabel
+    global LabEditorSnapshot, LabEditorCanvasBg, LabEditorCanvasHint, LabEditorZoomLabel, LabEditorHitRegions
+
+    if !LabEditorControlAlive(LabEditorSnapshot) || !LabEditorControlAlive(LabEditorCanvasBg)
+        return false
 
     if (LabEditorSourceImage = "" || !FileExist(LabEditorSourceImage)) {
-        LabEditorSnapshot.Visible := false
-        LabEditorCanvasBg.Visible := true
-        LabEditorCanvasHint.Visible := true
-        LabEditorCanvasHint.Move(LabEditorCanvasX + 44, LabEditorCanvasY + Floor(LabEditorCanvasH / 2) - 26,
-            Max(220, LabEditorCanvasW - 88), 52)
-        LabEditorZoomLabel.Text := "100%"
-        if repositionMarkers
-            try StrategyEditorRefreshMarkerLayout()
+        LabEditorHitRegions := []
+        try LabEditorSnapshot.Visible := false
+        try LabEditorCanvasBg.Visible := true
+        if LabEditorControlAlive(LabEditorCanvasHint) {
+            try LabEditorCanvasHint.Text := "No camera screenshot for this map yet.`nOpen Roblox on the map and press Capture Map."
+            try LabEditorCanvasHint.Move(LabEditorCanvasX + 44, LabEditorCanvasY + Floor(LabEditorCanvasH / 2) - 26,
+                Max(220, LabEditorCanvasW - 88), 52)
+            try LabEditorCanvasHint.Visible := true
+        }
+        if LabEditorControlAlive(LabEditorZoomLabel)
+            try LabEditorZoomLabel.Text := "100%"
         return false
     }
 
     dir := A_AppData "\Ultimate_Macro\StrategyEditor"
     if !DirExist(dir)
         DirCreate(dir)
-
-    ; Alternate frame files so Windows never has to display a file while GDI+ is
-    ; replacing that same file. This acts as a tiny disk-backed double buffer.
     renderPath := Mod(LabEditorViewportFrame, 2) = 0 ? LabEditorViewportPath : LabEditorViewportAltPath
     LabEditorViewportFrame += 1
 
-    if LabMapRenderViewport(LabEditorSourceImage, LabEditorViewport, renderPath, LabEditorCanvasW, LabEditorCanvasH) {
-        ; Do not clear the Picture before assigning the alternate frame. The old frame
-        ; remains visible until the new JPEG is ready, eliminating the one-frame black
-        ; flash observed in the live Windows recording during pan/zoom.
-        LabEditorSnapshot.Value := renderPath
-        LabEditorSnapshot.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
-        LabEditorSnapshot.Visible := true
-        LabEditorCanvasBg.Visible := false
-        LabEditorCanvasHint.Visible := false
-        LabEditorZoomLabel.Text := Round(LabEditorViewport.Zoom * 100) "%"
-        if repositionMarkers
-            try StrategyEditorRefreshMarkerLayout()
+    if StrategyEditorRenderCompositeFrame(renderPath) {
+        try LabEditorSnapshot.Value := renderPath
+        try LabEditorSnapshot.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
+        try LabEditorSnapshot.Visible := true
+        try LabEditorCanvasBg.Visible := false
+        if LabEditorControlAlive(LabEditorCanvasHint)
+            try LabEditorCanvasHint.Visible := false
+        if LabEditorControlAlive(LabEditorZoomLabel)
+            try LabEditorZoomLabel.Text := Round(LabEditorViewport.Zoom * 100) "%"
         return true
     }
 
-    LabEditorSnapshot.Visible := false
-    LabEditorCanvasBg.Visible := true
-    LabEditorCanvasHint.Text := "The cached image could not be rendered.`nRun Sync Assets again or Capture Roblox."
-    LabEditorCanvasHint.Visible := true
-    if repositionMarkers
-        try StrategyEditorRefreshMarkerLayout()
+    LabEditorHitRegions := []
+    try LabEditorSnapshot.Visible := false
+    try LabEditorCanvasBg.Visible := true
+    if LabEditorControlAlive(LabEditorCanvasHint) {
+        try LabEditorCanvasHint.Text := "The camera screenshot could not be rendered.`nCapture Map again or choose Snapshot."
+        try LabEditorCanvasHint.Visible := true
+    }
     return false
 }
 
@@ -216,180 +362,78 @@ StrategyEditorPan(dx, dy) {
 }
 
 StrategyEditorMouseWheel(wParam, lParam, msg, hwnd) {
-    global CurrentTab, LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
-    if (CurrentTab != "Tab7")
-        return
-    StrategyEditorGetClientCursor(&mx, &my)
-    if (mx < LabEditorCanvasX || mx > LabEditorCanvasX + LabEditorCanvasW
-        || my < LabEditorCanvasY || my > LabEditorCanvasY + LabEditorCanvasH)
-        return
-    delta := (wParam >> 16) & 0xFFFF
-    if (delta > 32767)
-        delta -= 65536
-    StrategyEditorZoom((delta / 120.0) * 0.15)
-    return 0
+    ; Legacy compatibility entry point. The 0.4 interaction module owns wheel routing.
+    return StrategyEditorInteractiveWheel(wParam, lParam, msg, hwnd)
 }
 
 StrategyEditorToggleExpanded(*) {
-    global LabEditorExpanded, LabEditorCanvasW, LabEditorCanvasH, LabEditorExpandBtn
-    global LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList, LabEditorCoordLabel, LabEditorDirtyLabel
-    global LabEditorXCtrl, LabEditorYCtrl, LabEditorApplyBtn, LabEditorSaveBtn, LabEditorOverwriteBtn
-    global LabEditorDirty, LabEditorStatus, LabEditorSnapshot, LabEditorCanvasBg, LabEditorCanvasHint, LabEditorInfoPanel
+    global LabEditorExpanded, LabEditorExpandBtn
+    global LabEditorInfoPanel, LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList
+    global LabEditorCoordLabel, LabEditorDirtyLabel, LabEditorXCtrl, LabEditorYCtrl, LabEditorApplyBtn
+    global LabEditorSaveBtn, LabEditorOverwriteBtn, LabEditorDirty, LabEditorStatus
 
     LabEditorExpanded := !LabEditorExpanded
-    if LabEditorExpanded {
-        LabEditorCanvasW := 650
-        LabEditorCanvasH := 300
-        LabEditorExpandBtn.Text := "Compact"
-        for ctrl in [LabEditorInfoPanel, LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList,
-            LabEditorCoordLabel, LabEditorDirtyLabel, LabEditorXCtrl, LabEditorYCtrl, LabEditorApplyBtn,
-            LabEditorSaveBtn, LabEditorOverwriteBtn, LabEditorDirty, LabEditorStatus]
-            ctrl.Visible := false
-    } else {
-        LabEditorCanvasW := 438
-        LabEditorCanvasH := 238
-        LabEditorExpandBtn.Text := "Expand"
-        for ctrl in [LabEditorInfoPanel, LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList,
-            LabEditorCoordLabel, LabEditorDirtyLabel, LabEditorXCtrl, LabEditorYCtrl, LabEditorApplyBtn,
-            LabEditorSaveBtn, LabEditorOverwriteBtn, LabEditorDirty, LabEditorStatus]
-            ctrl.Visible := true
+    if LabEditorControlAlive(LabEditorExpandBtn)
+        try LabEditorExpandBtn.Text := LabEditorExpanded ? "Compact" : "Expand"
+
+    details := [LabEditorInfoPanel, LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList,
+        LabEditorCoordLabel, LabEditorDirtyLabel, LabEditorXCtrl, LabEditorYCtrl, LabEditorApplyBtn,
+        LabEditorSaveBtn, LabEditorOverwriteBtn, LabEditorDirty, LabEditorStatus]
+    for ctrl in details {
+        if LabEditorControlAlive(ctrl)
+            try ctrl.Visible := !LabEditorExpanded
     }
 
-    ; StrategyEditorWorkspaceApply upgrades these fallback dimensions to the roomy
-    ; editor workspace immediately, without waiting for the workspace monitor tick.
-    workspaceApplied := false
-    try {
-        StrategyEditorWorkspaceApply(true)
-        workspaceApplied := true
-    } catch {
-        workspaceApplied := false
-    }
-    if workspaceApplied
-        return
-
-    LabEditorCanvasBg.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
-    LabEditorSnapshot.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
-    LabEditorCanvasHint.Move(LabEditorCanvasX + 44, LabEditorCanvasY + Floor(LabEditorCanvasH / 2) - 26,
-        Max(220, LabEditorCanvasW - 88), 52)
-    StrategyEditorRenderBackground()
+    try StrategyEditorWorkspaceApply(true)
+    catch
+        StrategyEditorRenderBackground()
 }
 
 StrategyEditorShowTower(placement) {
     global LabEditorDoc, LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta
+    if !IsObject(LabEditorDoc)
+        return
     towerName := LabEditorDoc.TowerNameForSlot(placement.slot)
     if (towerName = "")
         towerName := "Slot " placement.slot
-    portrait := LabTowerPortraitPath(towerName)
-    ; Like the map viewport, keep the previous picture alive until the replacement
-    ; path is ready. This avoids a small white/empty flash when stepping through rows.
-    if (portrait != "")
-        LabEditorTowerPortrait.Value := portrait
-    else
-        LabEditorTowerPortrait.Value := ""
-    LabEditorTowerName.Text := LabTowerPlacementDisplay(LabEditorDoc, placement)
-    LabEditorTowerMeta.Text := LabTowerPlacementMeta(LabEditorDoc, placement) "`nX " placement.x "  •  Y " placement.y
+
+    ; No website portrait. The selected-unit vanity badge uses the same label as the
+    ; in-map marker, keeping the Editor entirely local/screenshot based.
+    if LabEditorControlAlive(LabEditorTowerPortrait) {
+        try LabEditorTowerPortrait.Text := StrategyEditorMarkerLabel(placement)
+        try LabEditorTowerPortrait.SetFont("s17 w700 cFFFFFF", "Segoe UI")
+        try StrategyEditorSetCircularRegion(LabEditorTowerPortrait, 62)
+    }
+    if LabEditorControlAlive(LabEditorTowerName)
+        try LabEditorTowerName.Text := LabTowerPlacementDisplay(LabEditorDoc, placement)
+    if LabEditorControlAlive(LabEditorTowerMeta)
+        try LabEditorTowerMeta.Text := LabTowerPlacementMeta(LabEditorDoc, placement) "`nX " placement.x "  •  Y " placement.y
 }
 
 StrategyEditorAssetsMissing() {
-    global LabEditorDoc
-    if !IsObject(LabEditorDoc)
-        return false
     mapName := StrategyEditorMapName()
-    if (mapName != "" && LabMapPreferredBackground(mapName).path = "")
-        return true
-    for tower in LabEditorDoc.RequiredTowers {
-        if (LabTowerCachedPortraitPath(tower) = "")
-            return true
-    }
-    return false
+    return mapName != "" && LabMapCameraPath(mapName) = ""
 }
 
 StrategyEditorMaybeAutoSyncAssets() {
-    global LabEditorAssetsRequested, LabEditorDoc, LabEditorAssetBadge
-    if LabEditorAssetsRequested || !IsObject(LabEditorDoc)
+    global LabEditorAssetBadge
+    mapName := StrategyEditorMapName()
+    if !LabEditorControlAlive(LabEditorAssetBadge)
         return
-    if !StrategyEditorAssetsMissing() {
-        LabEditorAssetBadge.Text := "Assets: ready"
-        return
-    }
-    LabEditorAssetsRequested := true
-    LabEditorAssetBadge.Text := "Assets: queued"
-    SetTimer(StrategyEditorSyncAssets, -250)
+    if (mapName = "")
+        try LabEditorAssetBadge.Text := "Map source: unknown"
+    else if (LabMapCameraPath(mapName) != "")
+        try LabEditorAssetBadge.Text := "Map source: exact screenshot"
+    else
+        try LabEditorAssetBadge.Text := "Map source: capture required"
 }
 
+; Kept under the old name because the UI/workspace already references LabEditorSyncBtn.
+; In 0.4 it never touches the network; it simply captures the exact Roblox camera.
 StrategyEditorSyncAssets(*) {
-    global LabEditorSyncBtn, LabEditorAssetSyncPid, LabEditorDoc, LabEditorAssetBadge
-    if (LabEditorAssetSyncPid && ProcessExist(LabEditorAssetSyncPid))
-        return
-    script := A_ScriptDir "\submacros\lab_assets.ps1"
-    if !FileExist(script) {
-        StrategyEditorSetStatus("Asset sync helper is missing.", true)
-        return
-    }
-    LabEditorSyncBtn.Enabled := false
-    LabEditorSyncBtn.Text := "Syncing..."
-    LabEditorAssetBadge.Text := "Assets: syncing..."
-    StrategyEditorSetStatus("Syncing base tower portraits and the current map's top-down reference from the TDS Wiki...")
-    mapName := StrategyEditorMapName()
-    towerNames := ""
-    if IsObject(LabEditorDoc) {
-        for tower in LabEditorDoc.RequiredTowers {
-            entry := LabTowerResolve(tower)
-            towerNames .= (towerNames != "" ? "|" : "") entry.name
-        }
-    }
-    cmd := 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' script
-        . '" -InstallDir "' A_ScriptDir '" -MapName "' StrReplace(mapName, '"', '')
-        . '" -TowerNames "' StrReplace(towerNames, '"', '') '"'
-    try {
-        Run(cmd, , "Hide", &LabEditorAssetSyncPid)
-        SetTimer(StrategyEditorAssetSyncPoll, 500)
-    } catch Error as err {
-        LabEditorAssetSyncPid := 0
-        LabEditorSyncBtn.Enabled := true
-        LabEditorSyncBtn.Text := "Sync Assets"
-        LabEditorAssetBadge.Text := "Assets: sync failed"
-        StrategyEditorSetStatus("Asset sync could not start: " err.Message, true)
-    }
+    StrategyEditorCaptureRoblox()
 }
 
 StrategyEditorAssetSyncPoll(*) {
-    global LabEditorAssetSyncPid, LabEditorSyncBtn, LabEditorDoc, LabEditorSelectedRow, LabEditorAssetBadge
-    if (LabEditorAssetSyncPid && ProcessExist(LabEditorAssetSyncPid))
-        return
-    SetTimer(StrategyEditorAssetSyncPoll, 0)
-    LabEditorAssetSyncPid := 0
-    LabEditorSyncBtn.Enabled := true
-    LabEditorSyncBtn.Text := "Sync Assets"
-
-    towers := 0
-    maps := 0
-    misses := 0
-    errors := 0
-    optimized := 0
-    statusPath := A_AppData "\Ultimate_Macro\StrategyEditor\asset-sync-status.ini"
-    if FileExist(statusPath) {
-        try towers := Integer(IniRead(statusPath, "Sync", "Towers", 0))
-        try maps := Integer(IniRead(statusPath, "Sync", "Maps", 0))
-        try misses := Integer(IniRead(statusPath, "Sync", "Misses", 0))
-        try errors := Integer(IniRead(statusPath, "Sync", "Errors", 0))
-        try optimized := Integer(IniRead(statusPath, "Sync", "Optimized", 0))
-    }
-
-    if IsObject(LabEditorDoc) {
-        selected := LabEditorSelectedRow
-        StrategyEditorAutoLoadMap()
-        if (selected > 0)
-            StrategyEditorSelectPlacement(selected)
-    }
-
-    if (towers > 0 || maps > 0)
-        LabEditorAssetBadge.Text := "Assets: " towers " tower" (towers = 1 ? "" : "s") " • " maps " map" (maps = 1 ? "" : "s")
-    else if (errors > 0 || misses > 0)
-        LabEditorAssetBadge.Text := "Assets: no new art found"
-    else
-        LabEditorAssetBadge.Text := StrategyEditorAssetsMissing() ? "Assets: incomplete" : "Assets: ready"
-
-    StrategyEditorSetStatus("Asset sync complete: " towers " tower portrait(s), " maps " map reference(s), " misses " miss(es), " errors " error(s)"
-        . (optimized > 0 ? ", " optimized " optimized local image(s)" : "") ". " StrategyEditorBackgroundDescription())
+    ; No web asset worker exists in the 0.4 Editor.
 }
