@@ -4,6 +4,7 @@
 #Include "%A_ScriptDir%\lib\StrategyLab\LabRewardCatalog.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyCalibration.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabStrategyValidation.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorCore.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabSafety.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabTelemetry.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabRewardTracker.ahk"
@@ -11,6 +12,8 @@
 #Include "%A_ScriptDir%\lib\StrategyLab\LabStatsTab.ahk"
 
 ; Integrated Strategy Editor tab for Main_Lab.ahk.
+; Keep StrategyEditorCore above StrategyEditorUi: the UI constructs LabStratDocument
+; at runtime and must never rely on a test harness or another include to provide it.
 
 global LabEditorCtrls := []
 global LabEditorMarkerCtrls := []

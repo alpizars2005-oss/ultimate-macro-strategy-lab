@@ -1,0 +1,41 @@
+name: Strategy Editor dependency contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'channel/stable/files/lib__StrategyLab__StrategyEditor*.ahk'
+      - '.github/workflows/editor-dependency-contract.yml'
+  pull_request:
+    paths:
+      - 'channel/stable/files/lib__StrategyLab__StrategyEditor*.ahk'
+      - '.github/workflows/editor-dependency-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  editor-include-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Strategy Editor runtime dependency order
+        shell: python
+        run: |
+          from pathlib import Path
+
+          stable = Path('channel/stable/files')
+          tab = (stable / 'lib__StrategyLab__StrategyEditorTab.ahk').read_text(encoding='utf-8-sig')
+          ui = (stable / 'lib__StrategyLab__StrategyEditorUi.ahk').read_text(encoding='utf-8-sig')
+          core = (stable / 'lib__StrategyLab__StrategyEditorCore.ahk').read_text(encoding='utf-8-sig')
+
+          core_include = 'StrategyEditorCore.ahk'
+          ui_include = 'StrategyEditorUi.ahk'
+
+          assert 'LabStratDocument(path)' in ui, 'UI no longer matches the dependency contract'
+          assert 'class LabStratDocument' in core, 'StrategyEditorCore must declare LabStratDocument'
+          assert core_include in tab, 'StrategyEditorTab must include StrategyEditorCore at runtime'
+          assert ui_include in tab, 'StrategyEditorTab must include StrategyEditorUi at runtime'
+          assert tab.index(core_include) < tab.index(ui_include), 'StrategyEditorCore must be included before StrategyEditorUi'
+
+          print('Strategy Editor dependency order is self-contained and valid.')
