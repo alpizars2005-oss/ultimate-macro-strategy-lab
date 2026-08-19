@@ -65,9 +65,9 @@ Lab044GameplayUiGuard(*) {
         return
     hwnd := 0
     try hwnd := MainGui.Hwnd
-    if !hwnd || !DllCall("user32\\IsWindow", "Ptr", hwnd, "Int")
+    if !hwnd || !DllCall("user32\IsWindow", "Ptr", hwnd, "Int")
         return
-    if DllCall("user32\\IsWindowVisible", "Ptr", hwnd, "Int")
+    if DllCall("user32\IsWindowVisible", "Ptr", hwnd, "Int")
         try MainGui.Hide()
 }
 SetTimer(Lab044GameplayUiGuard, 120)

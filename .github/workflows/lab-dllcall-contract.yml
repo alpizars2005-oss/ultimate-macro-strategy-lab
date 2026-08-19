@@ -1,0 +1,88 @@
+name: Strategy Lab DllCall contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'channel/stable/files/*.ahk'
+      - '.github/workflows/lab-dllcall-contract.yml'
+  pull_request:
+    paths:
+      - 'channel/stable/files/*.ahk'
+      - '.github/workflows/lab-dllcall-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  dllcall-paths:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject invalid doubled DLL function separators
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          stable = Path('channel/stable/files')
+          bad = []
+          # In AHK strings, backslash is not an escape character. DllCall expects one
+          # DLL/function separator. Two literal backslashes make AutoHotkey try to load
+          # an invalid DLL path and fail only when that branch executes at runtime.
+          doubled = re.compile(r'DllCall\(\s*"[^"\r\n]*\\\\[^"\r\n]*"')
+          for path in stable.glob('*.ahk'):
+              text = path.read_text(encoding='utf-8-sig')
+              for lineno, line in enumerate(text.splitlines(), 1):
+                  if doubled.search(line):
+                      bad.append(f'{path}:{lineno}: {line.strip()}')
+
+          if bad:
+              raise SystemExit('Invalid doubled DllCall separator(s):\n' + '\n'.join(bad))
+
+          print('PASS: no doubled DLL/function separators in stable AHK DllCall strings.')
+
+      - name: Smoke-test Win32 DllCall form with AutoHotkey v2
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.19/AutoHotkey_2.0.19.zip'
+          Invoke-WebRequest -Uri $url -OutFile ahk.zip
+          Expand-Archive -Path ahk.zip -DestinationPath ahk -Force
+          $exe = Get-ChildItem -Path ahk -Recurse -Filter AutoHotkey64.exe | Select-Object -First 1
+          if (!$exe) { throw 'AutoHotkey64.exe not found.' }
+
+          @'
+          #Requires AutoHotkey v2.0
+          ok := DllCall("user32\IsWindow", "Ptr", 0, "Int")
+          visible := DllCall("user32\IsWindowVisible", "Ptr", 0, "Int")
+          FileAppend("PASS", "*")
+          ExitApp(0)
+          '@ | Set-Content -LiteralPath dllcall-smoke.ahk -Encoding UTF8
+
+          $psi = New-Object Diagnostics.ProcessStartInfo
+          $psi.FileName = $exe.FullName
+          $psi.Arguments = '/ErrorStdOut=UTF-8 "' + (Resolve-Path '.\dllcall-smoke.ahk').Path + '"'
+          $psi.WorkingDirectory = (Get-Location).Path
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+
+          $proc = New-Object Diagnostics.Process
+          $proc.StartInfo = $psi
+          if (!$proc.Start()) { throw 'Could not launch AutoHotkey DllCall smoke test.' }
+          $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+          $stderrTask = $proc.StandardError.ReadToEndAsync()
+          if (!$proc.WaitForExit(15000)) {
+            try { $proc.Kill() } catch {}
+            throw 'AutoHotkey DllCall smoke test timed out.'
+          }
+          $stdout = $stdoutTask.GetAwaiter().GetResult()
+          $stderr = $stderrTask.GetAwaiter().GetResult()
+          if ($stdout) { Write-Host $stdout }
+          if ($stderr) { Write-Host $stderr }
+          if ($proc.ExitCode -ne 0 -or (($stdout + $stderr) -match '(?im)^Error:')) {
+            throw "Win32 DllCall smoke test failed with exit code $($proc.ExitCode)."
+          }
+          if ($stdout -notmatch 'PASS') { throw 'Win32 DllCall smoke test did not reach the success marker.' }
