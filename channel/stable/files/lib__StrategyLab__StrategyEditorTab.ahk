@@ -13,7 +13,7 @@
 #Include "%A_ScriptDir%\lib\StrategyLab\LabRemoteGate.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabStatsTab.ahk"
 
-; Strategy Lab 0.4.3 single-canvas editor.
+; Strategy Lab 0.4.4 single-canvas editor.
 ; Map + true placement footprints + center markers are painted into one in-memory
 ; bitmap. Placements never create native controls; hit-testing remains geometric.
 
@@ -95,7 +95,7 @@ global LabEditorSubtitle := ""
 global LabEditorHeaderLine := ""
 global LabEditorLayerLabel := ""
 
-; Compatibility helper retained for any rolling-update caller. The 0.4.3 tower preview
+; Compatibility helper retained for any rolling-update caller. The 0.4.3+ tower preview
 ; is square/padded Picture art, so the live editor no longer clips portraits to a circle.
 StrategyEditorSetCircularRegion(ctrl, size) {
     if !IsObject(ctrl) || size <= 0
@@ -122,8 +122,11 @@ StrategyEditorSetCircularRegion(ctrl, size) {
 #Include "%A_ScriptDir%\lib\StrategyLab\LabEditorStability.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorInteraction.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorWorkspace.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\LabEditorHotfix044.ahk"
 
-OnMessage(0x0201, StrategyEditorDirectMouseDown)
-OnMessage(0x0200, StrategyEditorInteractiveMouseMove)
-OnMessage(0x0202, StrategyEditorInteractiveMouseUp)
-OnMessage(0x020A, StrategyEditorInteractiveWheel)
+; 0.4.4 owns the four live canvas messages. Legacy handlers remain compiled for
+; compatibility/tests, but are no longer on the Windows message hot path.
+OnMessage(0x0201, Lab044CanvasMouseDown)
+OnMessage(0x0200, Lab044CanvasMouseMove)
+OnMessage(0x0202, Lab044CanvasMouseUp)
+OnMessage(0x020A, Lab044CanvasWheel)
