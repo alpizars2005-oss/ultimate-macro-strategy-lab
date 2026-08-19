@@ -51,6 +51,16 @@ LabFootprintLogicalPoint(index, placement) {
     return {x: Number(placement.x), y: Number(placement.y)}
 }
 
+LabFootprintCanonicalPoint(index, placement, document) {
+    global LabFootprintReferenceWidth, LabFootprintReferenceHeight
+    logical := LabFootprintLogicalPoint(index, placement)
+    return {
+        x: logical.x * LabFootprintReferenceWidth / Max(1.0, Number(document.StrategyWidth)),
+        y: logical.y * LabFootprintReferenceHeight / Max(1.0, Number(document.StrategyHeight)),
+        radius: LabFootprintReferenceRadius(placement, document)
+    }
+}
+
 LabFootprintCanvasEllipse(placement, document, viewport, canvasW, canvasH) {
     global LabFootprintReferenceWidth
     radius := LabFootprintReferenceRadius(placement, document)
@@ -62,27 +72,36 @@ LabFootprintCanvasEllipse(placement, document, viewport, canvasW, canvasH) {
     }
 }
 
+LabFootprintPlacementCollides(index, document) {
+    if !IsObject(document) || index < 1 || index > document.Placements.Length
+        return false
+    aPlacement := document.Placements[index]
+    a := LabFootprintCanonicalPoint(index, aPlacement, document)
+    for otherIndex, otherPlacement in document.Placements {
+        if (otherIndex = index)
+            continue
+        b := LabFootprintCanonicalPoint(otherIndex, otherPlacement, document)
+        dx := a.x - b.x
+        dy := a.y - b.y
+        minDistance := a.radius + b.radius
+        if ((dx * dx) + (dy * dy) < (minDistance * minDistance))
+            return true
+    }
+    return false
+}
+
 ; Returns a Map keyed by document placement index. Any key present is intersecting at
 ; least one other real placement footprint. The comparison is deliberately performed in
 ; source strategy pixels so it does not depend on Editor zoom or hotbar cropping.
 LabFootprintCollisionMap(document) {
-    global LabFootprintReferenceWidth, LabFootprintReferenceHeight
     collisions := Map()
     if !IsObject(document) || document.Placements.Length < 2
         return collisions
 
-    width := Max(1.0, Number(document.StrategyWidth))
-    height := Max(1.0, Number(document.StrategyHeight))
     points := []
-
     for index, placement in document.Placements {
-        logical := LabFootprintLogicalPoint(index, placement)
-        points.Push({
-            index: index,
-            x: logical.x * LabFootprintReferenceWidth / width,
-            y: logical.y * LabFootprintReferenceHeight / height,
-            radius: LabFootprintReferenceRadius(placement, document)
-        })
+        p := LabFootprintCanonicalPoint(index, placement, document)
+        points.Push({index: index, x: p.x, y: p.y, radius: p.radius})
     }
 
     for i, a in points {
@@ -103,7 +122,6 @@ LabFootprintCollisionMap(document) {
 }
 
 LabFootprintMarkerDiameter(selected := false) {
-    ; The center marker stays compact. The boundary itself carries the placement truth.
     return selected ? 5.0 : 3.5
 }
 
