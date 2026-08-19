@@ -2,9 +2,7 @@
 #SingleInstance Force
 #Warn All, Off
 
-; Headless runtime contract for the 0.4.3 single-canvas geometry. Full syntax/include
-; validation is covered separately; this test exercises layer projection, hit-testing,
-; calibrated placement footprint size and footprint collision detection.
+; Headless runtime contract for the 0.4.6 client-aligned single canvas.
 
 StartStrategy(ctrl, *) {
 }
@@ -17,6 +15,7 @@ LoadStrategyFile(path) {
 getRobloxPos(&x, &y, &w, &h) {
     x := 0, y := 0, w := 1920, h := 1009
 }
+GetRobloxHWND(*) => 0
 
 Gdip_CreateBitmapFromFile(*) => 1
 Gdip_GetImageWidth(*) => 1920
@@ -46,6 +45,7 @@ try SetTimer(LabStatsRefresh, 0)
 try SetTimer(LabRewardTrackerTick, 0)
 try SetTimer(LabTelemetryTick, 0)
 try SetTimer(LabRewardMaybeSyncAssets, 0)
+try SetTimer(Lab044GameplayUiGuard, 0)
 
 fail(message) {
     try FileAppend("FAIL: " message "`n", "*")
@@ -89,7 +89,6 @@ if (items.Length != 3)
 StrategyEditorRebuildHitRegions(items)
 if (LabEditorHitRegions.Length != 3)
     fail("All placements did not create exactly 3 hit regions")
-
 first := LabEditorHitRegions[1]
 if (StrategyEditorHitTestPlacement(first.x, first.y) != first.index)
     fail("geometric hit-test did not resolve first painted placement")
@@ -106,6 +105,7 @@ for region in LabEditorHitRegions {
         fail("Warden placement remained in Operator layer hit regions")
 }
 
+LabEditorLayer := "All placements"
 LabEditorRingMode := "all"
 if (StrategyEditorRingButtonText() != "Footprints: All")
     fail("Footprints All label mismatch")
@@ -115,24 +115,38 @@ if !StrategyEditorRingModeAllows(1) || StrategyEditorRingModeAllows(2)
 LabEditorRingMode := "off"
 if StrategyEditorRingModeAllows(1)
     fail("Footprints Off still allows a footprint")
+LabEditorRingMode := "all"
 
 small := StrategyEditorFootprintDiameter({slot: 5})
 avg := StrategyEditorFootprintDiameter({slot: 1})
 if (small <= 0 || avg <= 0 || small >= avg)
-    fail("Small/Average footprint calibration ordering is invalid")
-; Average(1.5) at this 646x348 canvas should project to about 12px, not the old 28px+ halo.
-if (avg < 10 || avg > 14)
-    fail("Average footprint projection is not calibrated near 12px; got " avg)
+    fail("Small/Average footprint ordering is invalid")
+; Operator Average=1.5 and the supplied TDS cyan boundary is ~78px diameter at 1920.
+; On 646x348 canvas with the hotbar cropped, that projects to roughly 28px average.
+if (avg < 25 || avg > 31)
+    fail("Average cyan placement footprint is not near 28px; got " avg)
+if (Abs(LabFootprintPixelsPerUnitForDocument(LabEditorDoc) - 26.0) > 0.01)
+    fail("default cyan footprint scale is not 26 px/unit")
 
-; Two Average footprints have 18px reference radii each. 25px center separation must
-; collide, while the original 140px separation does not.
-LabEditorDoc.Placements[2].x := 985
+; Playable ROI stops above the hotbar. A strategy coordinate below that boundary must
+; not appear in the canvas geometry or become draggable.
+LabEditorDoc.Placements.Push({slot: 1, x: 960, y: 960, towerId: "hotbar"})
+items := StrategyEditorCanvasPlacements()
+if (items.Length != 3)
+    fail("hotbar placement was not excluded from canvas geometry")
+LabEditorDoc.Placements.Pop()
+
+; Two Average footprints now have ~39px canonical radii. 60px separation collides;
+; the original 140px separation does not.
+LabEditorDoc.Placements[2].x := 1020
 LabEditorDoc.Placements[2].y := 504
 collisions := LabFootprintCollisionMap(LabEditorDoc)
 if !collisions.Has(1) || !collisions.Has(2)
-    fail("overlapping Average footprints were not detected")
+    fail("overlapping Average cyan footprints were not detected")
 if collisions.Has(3)
     fail("distant Warden was incorrectly marked as colliding")
+if !LabFootprintPlacementCollides(1, LabEditorDoc)
+    fail("fast single-placement collision probe missed an overlap")
 
 LabEditorDoc.Placements[2].x := 1100
 LabEditorDoc.Placements[2].y := 560
@@ -140,8 +154,13 @@ collisions := LabFootprintCollisionMap(LabEditorDoc)
 if collisions.Has(1) || collisions.Has(2)
     fail("separated Operator footprints remained colliding")
 
+bottom := LabEditorViewport.ViewportToStrategy(323, 348, 1920,
+    LabMapPlayableStrategyHeight(1009), 646, 348)
+if (bottom.y < 915 || bottom.y > 920)
+    fail("viewport bottom no longer maps just above hotbar; got " bottom.y)
+
 if (LabEditorMarkerCtrls.Length != 0 || LabEditorMarkerByHwnd.Count != 0)
     fail("geometry operations created placement native controls")
 
-FileAppend("PASS: single-canvas layers, calibrated footprints, collisions and hit-testing`n", "*")
+FileAppend("PASS: 0.4.6 client ROI, cyan footprints, collisions, layers and hit-testing`n", "*")
 ExitApp(0)

@@ -2,26 +2,22 @@
 #SingleInstance Force
 #Warn All, Off
 
-; Validate-only harness: CI invokes this file with AutoHotkey v2 /Validate. Function
-; declarations and every #Include are loaded/validated while runtime work stays inert.
-; The include order mirrors StrategyEditorTab.ahk exactly.
+; Validate-only harness. The include order mirrors StrategyEditorTab.ahk exactly so CI
+; cannot accidentally lend the runtime a dependency that Main_Lab does not load.
 ExitApp()
 
 StartStrategy(ctrl, *) {
 }
-
 StopStrategy(ctrl, *) {
 }
-
 KillSubmacros(*) {
 }
-
 LoadStrategyFile(path) {
 }
-
 getRobloxPos(&x, &y, &w, &h) {
     x := 0, y := 0, w := 1920, h := 1009
 }
+GetRobloxHWND(*) => 0
 
 Gdip_CreateBitmapFromFile(*) => 1
 Gdip_GetImageWidth(*) => 100
@@ -43,7 +39,9 @@ Gdip_TextToGraphics(*) => 0
 Gdip_BitmapFromScreen(*) => 1
 
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__MapLibrary.ahk"
+#Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabAutoMapCapture.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__TowerCatalog.ahk"
+#Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabFootprintGeometry.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabRewardCatalog.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyCalibration.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabStrategyValidation.ahk"
@@ -55,9 +53,10 @@ Gdip_BitmapFromScreen(*) => 1
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabStatsTab.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorUi.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorPlacements.ahk"
-#Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorMaps.ahk"
+#Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorMaps046.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorSave.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabEditorStability.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorInteraction.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorWorkspace.ahk"
+#Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabEditorHotfix044.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabUpdater.ahk"

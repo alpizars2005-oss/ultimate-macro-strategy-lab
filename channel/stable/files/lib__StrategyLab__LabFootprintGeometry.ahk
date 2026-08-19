@@ -2,15 +2,36 @@
 
 ; Strategy Lab placement-footprint geometry.
 ;
-; TDS exposes placement footprint as a boundary radius (for example Small=1,
-; Average=1.5, Very Large=2.5). Ultimate Macro records placement centers in its
-; 1920x1009 strategy coordinate space. With the fixed macro camera, one footprint
-; unit is ~12 strategy pixels. Keeping the calculation in the reference coordinate
-; space makes collision checks independent from Editor zoom and canvas size.
+; The circle shown by the editor is the TDS PLACEMENT BOUNDARY: the small striped
+; circle while placing and the cyan outline around a placed tower. It is NOT the large
+; attack/range ring. The user's 1920-wide Operator reference measures ~78 px diameter;
+; Operator is Average/1.5, giving a visual baseline of ~26 strategy pixels per unit.
+;
+; A post-run analyzer can override that baseline per map after observing multiple cyan
+; rings, while collision checks remain in canonical 1920x1009 strategy coordinates.
 
 global LabFootprintReferenceWidth := 1920.0
 global LabFootprintReferenceHeight := 1009.0
-global LabFootprintPixelsPerUnit := 12.0
+global LabFootprintPixelsPerUnit := 26.0
+
+LabFootprintMapName(document) {
+    if !IsObject(document)
+        return ""
+    try {
+        if document.Settings.Has("map")
+            return Trim(String(document.Settings["map"]))
+    }
+    return ""
+}
+
+LabFootprintPixelsPerUnitForDocument(document) {
+    global LabFootprintPixelsPerUnit
+    mapName := LabFootprintMapName(document)
+    if (mapName = "")
+        return LabFootprintPixelsPerUnit
+    c := LabMapCalibration(mapName)
+    return IsObject(c) ? Number(c.pixelsPerUnit) : LabFootprintPixelsPerUnit
+}
 
 LabFootprintUnitsForPlacement(placement, document) {
     if !IsObject(document) || !IsObject(placement)
@@ -20,7 +41,7 @@ LabFootprintUnitsForPlacement(placement, document) {
 }
 
 LabFootprintReferenceRadius(placement, document) {
-    return LabFootprintUnitsForPlacement(placement, document) * LabFootprintPixelsPerUnit
+    return LabFootprintUnitsForPlacement(placement, document) * LabFootprintPixelsPerUnitForDocument(document)
 }
 
 LabFootprintLogicalPoint(index, placement) {
@@ -30,37 +51,57 @@ LabFootprintLogicalPoint(index, placement) {
     return {x: Number(placement.x), y: Number(placement.y)}
 }
 
-LabFootprintCanvasEllipse(placement, document, viewport, canvasW, canvasH) {
+LabFootprintCanonicalPoint(index, placement, document) {
     global LabFootprintReferenceWidth, LabFootprintReferenceHeight
-    radius := LabFootprintReferenceRadius(placement, document)
-    zoom := IsObject(viewport) ? Number(viewport.Zoom) : 1.0
+    logical := LabFootprintLogicalPoint(index, placement)
     return {
-        w: (radius * 2.0) * (Number(canvasW) / LabFootprintReferenceWidth) * zoom,
-        h: (radius * 2.0) * (Number(canvasH) / LabFootprintReferenceHeight) * zoom
+        x: logical.x * LabFootprintReferenceWidth / Max(1.0, Number(document.StrategyWidth)),
+        y: logical.y * LabFootprintReferenceHeight / Max(1.0, Number(document.StrategyHeight)),
+        radius: LabFootprintReferenceRadius(placement, document)
     }
 }
 
-; Returns a Map keyed by document placement index. Any key present in the map is
-; currently intersecting at least one other placement footprint. The comparison is
-; performed in the canonical 1920x1009 strategy space rather than canvas pixels.
+LabFootprintCanvasEllipse(placement, document, viewport, canvasW, canvasH) {
+    global LabFootprintReferenceWidth
+    radius := LabFootprintReferenceRadius(placement, document)
+    zoom := IsObject(viewport) ? Number(viewport.Zoom) : 1.0
+    strategyPlayableH := LabMapPlayableStrategyHeight(document.StrategyHeight)
+    return {
+        w: (radius * 2.0) * (Number(canvasW) / LabFootprintReferenceWidth) * zoom,
+        h: (radius * 2.0) * (Number(canvasH) / strategyPlayableH) * zoom
+    }
+}
+
+LabFootprintPlacementCollides(index, document) {
+    if !IsObject(document) || index < 1 || index > document.Placements.Length
+        return false
+    aPlacement := document.Placements[index]
+    a := LabFootprintCanonicalPoint(index, aPlacement, document)
+    for otherIndex, otherPlacement in document.Placements {
+        if (otherIndex = index)
+            continue
+        b := LabFootprintCanonicalPoint(otherIndex, otherPlacement, document)
+        dx := a.x - b.x
+        dy := a.y - b.y
+        minDistance := a.radius + b.radius
+        if ((dx * dx) + (dy * dy) < (minDistance * minDistance))
+            return true
+    }
+    return false
+}
+
+; Returns a Map keyed by document placement index. Any key present is intersecting at
+; least one other real placement footprint. The comparison is deliberately performed in
+; source strategy pixels so it does not depend on Editor zoom or hotbar cropping.
 LabFootprintCollisionMap(document) {
-    global LabFootprintReferenceWidth, LabFootprintReferenceHeight
     collisions := Map()
     if !IsObject(document) || document.Placements.Length < 2
         return collisions
 
-    width := Max(1.0, Number(document.StrategyWidth))
-    height := Max(1.0, Number(document.StrategyHeight))
     points := []
-
     for index, placement in document.Placements {
-        logical := LabFootprintLogicalPoint(index, placement)
-        points.Push({
-            index: index,
-            x: logical.x * LabFootprintReferenceWidth / width,
-            y: logical.y * LabFootprintReferenceHeight / height,
-            radius: LabFootprintReferenceRadius(placement, document)
-        })
+        p := LabFootprintCanonicalPoint(index, placement, document)
+        points.Push({index: index, x: p.x, y: p.y, radius: p.radius})
     }
 
     for i, a in points {
@@ -81,11 +122,9 @@ LabFootprintCollisionMap(document) {
 }
 
 LabFootprintMarkerDiameter(selected := false) {
-    ; Small footprint diameter is only ~5.5 px on the compact 438px canvas. Keep the
-    ; center dot smaller than that so the true reserved-space boundary remains visible.
-    return selected ? 4.0 : 3.0
+    return selected ? 5.0 : 3.5
 }
 
 LabFootprintLabelOffset(selected := false) {
-    return selected ? 5 : 4
+    return selected ? 6 : 5
 }

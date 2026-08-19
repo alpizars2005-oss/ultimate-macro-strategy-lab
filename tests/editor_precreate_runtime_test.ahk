@@ -15,6 +15,7 @@ LoadStrategyFile(path) {
 getRobloxPos(&x, &y, &w, &h) {
     x := 0, y := 0, w := 1920, h := 1009
 }
+GetRobloxHWND(*) => 0
 
 Gdip_CreateBitmapFromFile(*) => 1
 Gdip_GetImageWidth(*) => 100

@@ -1,16 +1,18 @@
-# Strategy Lab stable delivery map 0.4.4 editor runtime isolation
+# Strategy Lab stable delivery map 0.4.6 client-aligned footprint calibration
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 run_lab.bat|channel/stable/files/run_lab.bat|raw
 lib/StrategyLab/LabUpdater.ahk|channel/stable/files/lib__StrategyLab__LabUpdater.ahk|raw
 submacros/lab_update.ps1|channel/stable/files/submacros__lab_update.ps1|raw
 submacros/lab_preflight.ps1|channel/stable/files/submacros__lab_preflight.ps1|raw
+submacros/lab_watchdog_patch.ps1|channel/stable/files/submacros__lab_watchdog_patch.ps1|raw
+submacros/lab_postrun_calibrate.ps1|channel/stable/files/submacros__lab_postrun_calibrate.ps1|raw
 submacros/lab_syntax_probe.ps1|channel/stable/files/submacros__lab_syntax_probe.ps1|raw
 lib/StrategyLab/StrategyEditorCore.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorCore.ahk|raw
 lib/StrategyLab/StrategyEditorTab.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorTab.ahk|raw
 lib/StrategyLab/StrategyEditorUi.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorUi.ahk|raw
 lib/StrategyLab/StrategyEditorPlacements.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorPlacements.ahk|raw
-lib/StrategyLab/StrategyEditorMaps.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorMaps.ahk|raw
+lib/StrategyLab/StrategyEditorMaps046.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorMaps046.ahk|raw
 lib/StrategyLab/StrategyEditorSave.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorSave.ahk|raw
 lib/StrategyLab/LabEditorStability.ahk|channel/stable/files/lib__StrategyLab__LabEditorStability.ahk|raw
 lib/StrategyLab/StrategyEditorInteraction.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorInteraction.ahk|raw
@@ -19,6 +21,7 @@ lib/StrategyLab/LabEditorHotfix044.ahk|channel/stable/files/lib__StrategyLab__La
 lib/StrategyLab/StrategyCalibration.ahk|channel/stable/files/lib__StrategyLab__StrategyCalibration.ahk|raw
 lib/StrategyLab/MapLibrary.ahk|channel/stable/files/lib__StrategyLab__MapLibrary.ahk|raw
 lib/StrategyLab/LabAutoMapCapture.ahk|channel/stable/files/lib__StrategyLab__LabAutoMapCapture.ahk|raw
+lib/StrategyLab/LabWatchdogBridge.ahk|channel/stable/files/lib__StrategyLab__LabWatchdogBridge.ahk|raw
 lib/StrategyLab/TowerCatalog.ahk|channel/stable/files/lib__StrategyLab__TowerCatalog.ahk|raw
 lib/StrategyLab/LabFootprintGeometry.ahk|channel/stable/files/lib__StrategyLab__LabFootprintGeometry.ahk|raw
 lib/StrategyLab/LabRewardCatalog.ahk|channel/stable/files/lib__StrategyLab__LabRewardCatalog.ahk|raw

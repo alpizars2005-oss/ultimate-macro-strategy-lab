@@ -8,10 +8,12 @@ def stable_text(name: str) -> str:
 
 def test_strategy_editor_does_not_pass_object_property_byref():
     core = stable_text("lib__StrategyLab__StrategyEditorCore.ahk")
+    validation = stable_text("lib__StrategyLab__LabStrategyValidation.ahk")
     assert "&this." not in core
-    assert 'detectedEncoding := ""' in core
-    assert "LabStrategyReadText(path, &detectedEncoding)" in core
-    assert "this.Encoding := detectedEncoding" in core
+    assert "LabStrategyReadFile(path)" in core
+    assert "this.Encoding := loaded.Encoding" in core
+    assert 'FileRead(path, "RAW")' in validation
+    assert "LabStrategyTrimTerminalNuls" in validation
 
 
 def test_upstream_start_stop_are_called_with_required_control_arg():

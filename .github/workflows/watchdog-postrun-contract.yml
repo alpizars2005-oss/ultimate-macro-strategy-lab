@@ -1,0 +1,111 @@
+name: Strategy Lab post-run calibration contract
+
+on:
+  pull_request:
+    paths:
+      - 'channel/stable/files/lib__StrategyLab__LabWatchdogBridge.ahk'
+      - 'channel/stable/files/submacros__lab_watchdog_patch.ps1'
+      - 'channel/stable/files/submacros__lab_postrun_calibrate.ps1'
+      - '.github/workflows/watchdog-postrun-contract.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'channel/stable/files/lib__StrategyLab__LabWatchdogBridge.ahk'
+      - 'channel/stable/files/submacros__lab_watchdog_patch.ps1'
+      - 'channel/stable/files/submacros__lab_postrun_calibrate.ps1'
+      - '.github/workflows/watchdog-postrun-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  watchdog-and-cyan-calibration:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch watchdog twice without duplicate hooks
+        shell: pwsh
+        run: |
+          $stage = Join-Path (Get-Location).Path '_watchdog_stage'
+          New-Item -ItemType Directory -Force -Path (Join-Path $stage 'submacros'),(Join-Path $stage 'lib\StrategyLab') | Out-Null
+          Copy-Item 'channel\stable\files\lib__StrategyLab__LabWatchdogBridge.ahk' (Join-Path $stage 'lib\StrategyLab\LabWatchdogBridge.ahk')
+          Copy-Item 'channel\stable\files\submacros__lab_postrun_calibrate.ps1' (Join-Path $stage 'submacros\lab_postrun_calibrate.ps1')
+          @'
+          #Requires AutoHotkey v2.0
+          #Include "%A_LineFile%\..\..\lib\ImageSearch\ImageSearch.ahk"
+          #Include "%A_LineFile%\..\..\lib\Gdip_All.ahk"
+          #Include "%A_LineFile%\..\..\lib\OCR.ahk"
+          #Include "%A_LineFile%\..\..\lib\Roblox.ahk"
+          if (resTriumph1.status == "success" && resTriumph1.score > 0.7) {
+              RestartMain()
+          }
+          if (resTriumph2.status == "success" && resTriumph2.score > 0.7) {
+              RestartMain()
+          }
+          if (resLost.status == "success" && resLost.score > 0.7) {
+              RestartMain()
+          }
+          '@ | Set-Content -LiteralPath (Join-Path $stage 'submacros\watchdog.ahk') -Encoding UTF8
+
+          $patch = Resolve-Path 'channel\stable\files\submacros__lab_watchdog_patch.ps1'
+          & $patch -InstallDir $stage
+          if ($LASTEXITCODE -ne 0) { throw "watchdog patch failed first pass: $LASTEXITCODE" }
+          & $patch -InstallDir $stage
+          if ($LASTEXITCODE -ne 0) { throw "watchdog patch failed second pass: $LASTEXITCODE" }
+
+          $text = Get-Content -LiteralPath (Join-Path $stage 'submacros\watchdog.ahk') -Raw
+          if (([regex]::Matches($text,'LabWatchdogCaptureOutcome\("Triumph"\)')).Count -ne 2) { throw 'Triumph hook count != 2' }
+          if (([regex]::Matches($text,'LabWatchdogCaptureOutcome\("Loss"\)')).Count -ne 1) { throw 'Loss hook count != 1' }
+          if (([regex]::Matches($text,'LabWatchdogBridge\.ahk')).Count -ne 1) { throw 'Bridge include count != 1' }
+
+      - name: Recover 26 px-unit from synthetic cyan Operator boundaries
+        shell: pwsh
+        run: |
+          $stage = Join-Path (Get-Location).Path '_cyan_stage'
+          $env:APPDATA = Join-Path $stage 'AppData'
+          New-Item -ItemType Directory -Force -Path (Join-Path $stage 'Resources\StrategyLab\Towers') | Out-Null
+          @'
+          [Operator]
+          display=Operator
+          aliases=Operator
+          placementFootprint=1.5
+          '@ | Set-Content -LiteralPath (Join-Path $stage 'Resources\StrategyLab\Towers\catalog.ini') -Encoding UTF8
+          @'
+          [Settings]
+          map=Dead Ahead
+          requiredTowers=Operator
+          [DO NOT EDIT]
+          width=1920
+          height=1009
+          [Steps]
+          SpawnTower(500,300,1,a)
+          SpawnTower(800,350,1,b)
+          SpawnTower(1100,450,1,c)
+          SpawnTower(1400,600,1,d)
+          '@ | Set-Content -LiteralPath (Join-Path $stage 'test.strat') -Encoding UTF8
+
+          Add-Type -AssemblyName System.Drawing
+          $bmp = [Drawing.Bitmap]::new(1920,1009)
+          $g = [Drawing.Graphics]::FromImage($bmp)
+          try {
+            $g.Clear([Drawing.Color]::FromArgb(25,30,35))
+            $pen = [Drawing.Pen]::new([Drawing.Color]::FromArgb(0,220,250),2)
+            try {
+              foreach ($p in @(@(500,300),@(800,350),@(1100,450),@(1400,600))) {
+                $g.DrawEllipse($pen,$p[0]-39,$p[1]-39,78,78)
+              }
+            } finally { $pen.Dispose() }
+            $bmp.Save((Join-Path $stage 'postrun.png'),[Drawing.Imaging.ImageFormat]::Png)
+          } finally { $g.Dispose(); $bmp.Dispose() }
+
+          $worker = Resolve-Path 'channel\stable\files\submacros__lab_postrun_calibrate.ps1'
+          & $worker -InstallDir $stage -Screenshot (Join-Path $stage 'postrun.png') -StrategyPath (Join-Path $stage 'test.strat') -MapName 'Dead Ahead' -Result 'Triumph'
+          if ($LASTEXITCODE -ne 0) { throw "calibration worker exit $LASTEXITCODE" }
+          $out = Join-Path $env:APPDATA 'Ultimate_Macro\StrategyEditor\MapLibrary\calibration\dead-ahead.ini'
+          if (!(Test-Path -LiteralPath $out)) { throw 'calibration ini was not produced' }
+          $ppu = [double](Get-Content $out | Where-Object {$_ -match '^PixelsPerUnit='} | ForEach-Object {$_.Split('=')[1]})
+          $samples = [int](Get-Content $out | Where-Object {$_ -match '^Samples='} | ForEach-Object {$_.Split('=')[1]})
+          if ($ppu -lt 25.0 -or $ppu -gt 27.0) { throw "recovered ppu out of range: $ppu" }
+          if ($samples -lt 3) { throw "too few calibration samples: $samples" }
+          Write-Host "PASS: synthetic cyan calibration recovered $ppu px/unit from $samples samples."
