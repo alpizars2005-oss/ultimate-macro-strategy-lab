@@ -1,11 +1,17 @@
 #Requires AutoHotkey v2.0
 
 ; Strategy Lab map library.
-; The authoritative editor background is the exact Roblox client view captured with the
-; same fixed Ultimate Macro camera that produced the SpawnTower coordinates. Wiki maps
-; are never used for coordinate editing.
+; The editor uses the exact Roblox CLIENT image, not a screen-origin crop. Ultimate
+; Macro records SpawnTower coordinates in the 1920x1009 client coordinate space.
+;
+; 0.4.6 also exposes a playable ROI which stops just above the hotbar. This removes UI
+; pixels that can never contain a valid placement while preserving strategy coordinates
+; through a matching forward/inverse projection.
 
 global LabMapRenderCache := {path: "", stamp: "", size: 0, bitmap: 0, width: 0, height: 0}
+global LabMapReferenceWidth := 1920.0
+global LabMapReferenceHeight := 1009.0
+global LabMapPlayableBottomReference := 918.0
 OnExit(LabMapReleaseRenderCache)
 
 LabMapSafeKey(value) {
@@ -28,9 +34,22 @@ LabMapCameraDir() {
     return dir
 }
 
+LabMapCalibrationDir() {
+    dir := LabMapRoot() "\calibration"
+    if !DirExist(dir)
+        DirCreate(dir)
+    return dir
+}
+
+LabMapPostRunDir() {
+    dir := LabMapRoot() "\postrun"
+    if !DirExist(dir)
+        DirCreate(dir)
+    return dir
+}
+
 LabMapReferenceDir() {
-    ; Kept only for backwards-compatible cleanup/migration. The 0.4+ editor does not
-    ; use web/top-down reference images for coordinate editing.
+    ; Backwards-compatible cleanup only. Web map art is never used for coordinate work.
     dir := LabMapRoot() "\reference"
     if !DirExist(dir)
         DirCreate(dir)
@@ -75,6 +94,21 @@ LabMapResolve(mapName) {
     return {key: key, name: Trim(String(mapName)), wikiPage: Trim(String(mapName)), aliases: mapName}
 }
 
+; IMPORTANT: getRobloxPos() in the upstream macro intentionally returns client SIZE but
+; x/y=0 because it wraps GetClientRect. Gdip_BitmapFromScreen needs SCREEN coordinates.
+; WinGetClientPos is therefore the authoritative capture rectangle.
+LabMapGetRobloxClientRect(&x, &y, &width, &height) {
+    x := 0, y := 0, width := 0, height := 0
+    hwnd := 0
+    try hwnd := GetRobloxHWND()
+    if !hwnd
+        return false
+    try WinGetClientPos(&x, &y, &width, &height, "ahk_id " hwnd)
+    catch
+        return false
+    return width >= 100 && height >= 100
+}
+
 LabMapImageUsable(path) {
     if (path = "" || !FileExist(path))
         return false
@@ -93,8 +127,6 @@ LabMapImageUsable(path) {
 }
 
 LabMapFindCachedFile(dir, key) {
-    ; 0.4.3 writes JPEG first. Check it before legacy PNG so a stale 0.4.2 capture can
-    ; never win after a successful refresh.
     for ext in ["jpg", "jpeg", "png", "bmp"] {
         path := dir "\" key "." ext
         if !FileExist(path)
@@ -128,31 +160,40 @@ LabMapCameraMetaPath(mapName) {
     return entry.key != "" ? LabMapCameraDir() "\" entry.key ".meta.ini" : ""
 }
 
-LabMapCameraCaptureStage(mapName) {
+LabMapCameraMetaValue(mapName, key, fallback := "") {
     meta := LabMapCameraMetaPath(mapName)
     if (meta = "" || !FileExist(meta))
-        return ""
-    try return Trim(IniRead(meta, "Capture", "Stage", ""))
+        return fallback
+    try return IniRead(meta, "Capture", key, fallback)
     catch
-        return ""
+        return fallback
 }
+
+LabMapCameraCaptureStage(mapName) => Trim(String(LabMapCameraMetaValue(mapName, "Stage", "")))
 
 LabMapCameraNeedsRefresh(mapName) {
     camera := LabMapCameraPath(mapName)
     if (camera = "")
         return true
-    ; 0.4.2 could capture the map-vote/lobby screen before the match. It wrote no
-    ; metadata, so one successful SpawnTower-stage capture transparently replaces it.
+
+    ; Captures through 0.4.5 used GetClientRect size with screen x/y=0. On a normal
+    ; maximized Roblox window that included the title bar and shifted every placement.
+    ; Only a capture explicitly tagged ClientAligned=1 is trusted from 0.4.6 onward.
+    if String(LabMapCameraMetaValue(mapName, "ClientAligned", 0)) != "1"
+        return true
     return LabMapCameraCaptureStage(mapName) = ""
 }
 
 LabMapWriteCameraMeta(mapName, stage, width := 0, height := 0) {
+    global LabMapPlayableBottomReference
     meta := LabMapCameraMetaPath(mapName)
     if (meta = "")
         return
     try {
         IniWrite(stage, meta, "Capture", "Stage")
-        IniWrite("0.4.3", meta, "Capture", "WriterVersion")
+        IniWrite("0.4.6", meta, "Capture", "WriterVersion")
+        IniWrite(1, meta, "Capture", "ClientAligned")
+        IniWrite(LabMapPlayableBottomReference, meta, "Capture", "PlayableBottomReference")
         IniWrite(FormatTime(, "yyyy-MM-dd HH:mm:ss"), meta, "Capture", "CapturedAt")
         if (width > 0)
             IniWrite(width, meta, "Capture", "Width")
@@ -173,8 +214,6 @@ LabMapRemoveCameraVariants(key, keepPath := "") {
     }
 }
 
-; Save from an already-decoded bitmap. This is the preferred auto-capture path: no
-; intermediate PNG and no FileCopy over a GDI+-locked image.
 LabMapSaveCameraBitmap(mapName, pBitmap, stage := "manual") {
     entry := LabMapResolve(mapName)
     if (entry.key = "" || !pBitmap)
@@ -194,15 +233,10 @@ LabMapSaveCameraBitmap(mapName, pBitmap, stage := "manual") {
         try FileDelete(temp)
 
     try {
-        ; JPEG 86 keeps text/terrain crisp enough for a placement canvas while making
-        ; the persistent map library dramatically smaller than full-resolution PNG.
         Gdip_SaveBitmapToFile(pBitmap, temp, 86)
         if !FileExist(temp) || FileGetSize(temp) < 1000 || !LabMapImageUsable(temp)
             throw Error("Encoded camera screenshot is not usable.")
 
-        ; Critical ordering: the renderer may hold the old target decoded. Releasing
-        ; that bitmap BEFORE replacement avoids Windows ERROR_SHARING_VIOLATION/
-        ; generic FileCopy failures when an editor is open during auto-capture.
         LabMapReleaseRenderCache()
         LabMapRemoveCameraVariants(entry.key)
         FileMove(temp, target, 1)
@@ -219,7 +253,6 @@ LabMapSaveCameraBitmap(mapName, pBitmap, stage := "manual") {
     }
 }
 
-; Compatibility path for the manual Capture Map button and older callers.
 LabMapSaveCameraCapture(mapName, sourcePath, stage := "manual") {
     if (sourcePath = "" || !FileExist(sourcePath))
         return ""
@@ -235,6 +268,63 @@ LabMapSaveCameraCapture(mapName, sourcePath, stage := "manual") {
         if pBitmap
             try Gdip_DisposeImage(pBitmap)
     }
+}
+
+LabMapPlayableRatio() {
+    global LabMapReferenceHeight, LabMapPlayableBottomReference
+    return LabMapPlayableBottomReference / LabMapReferenceHeight
+}
+
+LabMapPlayableStrategyHeight(strategyHeight) {
+    return Max(1.0, Number(strategyHeight) * LabMapPlayableRatio())
+}
+
+LabMapPlayableSourceHeight(sourceHeight) {
+    return Max(1, Floor(Number(sourceHeight) * LabMapPlayableRatio()))
+}
+
+LabMapCalibrationPath(mapName) {
+    entry := LabMapResolve(mapName)
+    return entry.key != "" ? LabMapCalibrationDir() "\" entry.key ".ini" : ""
+}
+
+LabMapCalibration(mapName) {
+    ; The default 26 px/unit comes from the actual TDS cyan placement outline measured
+    ; in the canonical 1920-wide client: an Average/1.5 Operator ring is ~78px across.
+    result := {pixelsPerUnit: 26.0, offsetX: 0.0, offsetY: 0.0, samples: 0, confidence: 0.0, source: "visual-default"}
+    path := LabMapCalibrationPath(mapName)
+    if (path = "" || !FileExist(path))
+        return result
+    try {
+        ppu := IniRead(path, "Geometry", "PixelsPerUnit", result.pixelsPerUnit)
+        ox := IniRead(path, "Geometry", "OffsetX", 0)
+        oy := IniRead(path, "Geometry", "OffsetY", 0)
+        samples := IniRead(path, "Geometry", "Samples", 0)
+        confidence := IniRead(path, "Geometry", "Confidence", 0)
+        source := IniRead(path, "Geometry", "Source", "postrun")
+        if IsNumber(ppu) && Number(ppu) >= 16 && Number(ppu) <= 40
+            result.pixelsPerUnit := Number(ppu)
+        if IsNumber(ox) && Abs(Number(ox)) <= 50
+            result.offsetX := Number(ox)
+        if IsNumber(oy) && Abs(Number(oy)) <= 50
+            result.offsetY := Number(oy)
+        if IsNumber(samples)
+            result.samples := Integer(samples)
+        if IsNumber(confidence)
+            result.confidence := Number(confidence)
+        result.source := source
+    }
+    return result
+}
+
+LabMapApplyCalibrationPoint(mapName, x, y) {
+    c := LabMapCalibration(mapName)
+    return {x: Number(x) + c.offsetX, y: Number(y) + c.offsetY}
+}
+
+LabMapRemoveCalibrationPoint(mapName, x, y) {
+    c := LabMapCalibration(mapName)
+    return {x: Number(x) - c.offsetX, y: Number(y) - c.offsetY}
 }
 
 LabMapInvalidateRenderCache(path := "") {
@@ -331,14 +421,15 @@ class LabMapViewport {
         this.CenterY := Max(halfH, Min(1.0 - halfH, this.CenterY))
     }
 
-    SourceRect(sourceW, sourceH) {
+    SourceRect(sourceW, sourceH, contentRatio := 1.0) {
+        contentH := Max(1, Floor(sourceH * Max(0.1, Min(1.0, Number(contentRatio)))))
         sw := Max(1, Round(sourceW / this.Zoom))
-        sh := Max(1, Round(sourceH / this.Zoom))
+        sh := Max(1, Round(contentH / this.Zoom))
         sx := Round((this.CenterX * sourceW) - sw / 2)
-        sy := Round((this.CenterY * sourceH) - sh / 2)
+        sy := Round((this.CenterY * contentH) - sh / 2)
         sx := Max(0, Min(sourceW - sw, sx))
-        sy := Max(0, Min(sourceH - sh, sy))
-        return {x: sx, y: sy, w: sw, h: sh}
+        sy := Max(0, Min(contentH - sh, sy))
+        return {x: sx, y: sy, w: sw, h: sh, contentH: contentH}
     }
 
     StrategyToViewport(x, y, strategyW, strategyH, viewportW, viewportH) {
@@ -367,9 +458,6 @@ class LabMapViewport {
     }
 }
 
-; Retained for callers outside the live Editor. The editor itself renders directly to
-; an in-memory HBITMAP in StrategyEditorMaps.ahk and therefore does not use this helper
-; while dragging/panning.
 LabMapRenderViewport(sourcePath, viewport, outputPath, width, height) {
     pSource := LabMapAcquireRenderBitmap(sourcePath, &sourceW, &sourceH)
     if !pSource || sourceW <= 0 || sourceH <= 0
@@ -378,7 +466,7 @@ LabMapRenderViewport(sourcePath, viewport, outputPath, width, height) {
     pOut := 0
     graphics := 0
     try {
-        rect := viewport.SourceRect(sourceW, sourceH)
+        rect := viewport.SourceRect(sourceW, sourceH, LabMapPlayableRatio())
         pOut := Gdip_CreateBitmap(width, height)
         if !pOut
             return false
