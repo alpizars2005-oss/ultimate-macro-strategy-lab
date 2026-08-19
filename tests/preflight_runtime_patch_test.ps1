@@ -13,7 +13,7 @@ try {
     $required = @(
         'lib\StrategyLab\StrategyEditorTab.ahk',
         'lib\StrategyLab\StrategyEditorPlacements.ahk',
-        'lib\StrategyLab\StrategyEditorMaps.ahk',
+        'lib\StrategyLab\StrategyEditorMaps046.ahk',
         'lib\StrategyLab\StrategyEditorInteraction.ahk',
         'lib\StrategyLab\MapLibrary.ahk',
         'lib\StrategyLab\LabAutoMapCapture.ahk',
