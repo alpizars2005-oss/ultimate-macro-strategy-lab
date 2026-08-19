@@ -41,8 +41,9 @@ try {
     $preflightTarget = Join-Path $root 'submacros\lab_preflight.ps1'
     Copy-Item -LiteralPath $preflightSource -Destination $preflightTarget -Force
 
-    # Start from the old 0.4.2 lobby-stage hook so this proves migration removes it
-    # and installs the canonical capture after LoadGame(), before RecordedSteps begin.
+    # This fixture mirrors the real Ultimate Macro baseline ordering supplied in the
+    # clean package. There is deliberately NO LoadGame() call inside RunStrategy().
+    # Start from a legacy 0.4.2 CheckTheMapF hook so migration is also exercised.
     $fixture = @'
 #Requires AutoHotkey v2.0
 
@@ -53,28 +54,44 @@ StartStrategy(*) {
     v := MainGui.Submit(false)
 }
 
-RunStrategy() {
+RunStrategy(stratFile := "", skipRestart := false) {
     switched := false
+
+    if (!switched) {
+        if (!skipRestart) {
+            CheckRestart()
+        } else {
+            CloseRoblox()
+            RunRoblox()
+            JoinGame()
+        }
+    }
+
+    if (readyX = 0 && readyY = 0) {
+        waitReady()
+    }
+
     if (!IsRestarting) {
+        if (!InArray(SpecialMaps, gamemap)) {
+            AlignCamera()
+        }
         CheckTheMapF()
         ; <StrategyLabAutoMapCapture>
-        ; One-shot exact editor screenshot after normal/special-map camera alignment.
         try LabMapAutoCaptureIfMissing(gamemap)
         ; </StrategyLabAutoMapCapture>
     }
 
-    LoadGame()
+    activateTimescale()
+    ClickReady()
+    PlayStrategy()
+}
 
+PlayStrategy() {
     i := 1
     while (i <= RecordedSteps.Length) {
         step := RecordedSteps[i]
         i += 1
     }
-}
-
-LoadGame() {
-    AlignCamera()
-    Sleep(500)
 }
 
 SpawnTower(X, Y, slotNumber, towerID) {
@@ -120,18 +137,31 @@ SpawnTower(X, Y, slotNumber, towerID) {
         throw 'legacy SpawnTower deferred capture remained after migration'
     }
 
-    $loadGamePos = $patched.IndexOf('LoadGame()')
+    $alignPos = $patched.IndexOf('AlignCamera()')
+    $checkMapPos = $patched.IndexOf('CheckTheMapF()')
     $capturePos = $patched.IndexOf('try LabMapAutoCaptureAligned()')
+    $timescalePos = $patched.IndexOf('activateTimescale()')
+    $readyPos = $patched.IndexOf('ClickReady()')
+    $playPos = $patched.IndexOf('PlayStrategy()')
     $firstStepPos = $patched.IndexOf('i := 1')
-    $spawnPos = $patched.IndexOf('SpawnTower(X, Y, slotNumber, towerID)')
-    if ($loadGamePos -lt 0 -or $capturePos -le $loadGamePos) {
-        throw 'automatic capture is not installed after the RunStrategy LoadGame call'
+
+    if ($alignPos -lt 0 -or $checkMapPos -le $alignPos) {
+        throw 'fixture no longer mirrors AlignCamera -> CheckTheMapF ordering'
+    }
+    if ($capturePos -le $checkMapPos) {
+        throw 'automatic capture does not occur after camera/map verification'
+    }
+    if ($timescalePos -lt 0 -or $capturePos -ge $timescalePos) {
+        throw 'automatic capture is not immediately before activateTimescale'
+    }
+    if ($readyPos -lt 0 -or $capturePos -ge $readyPos) {
+        throw 'automatic capture does not occur before ClickReady'
+    }
+    if ($playPos -lt 0 -or $capturePos -ge $playPos) {
+        throw 'automatic capture does not occur before PlayStrategy'
     }
     if ($firstStepPos -lt 0 -or $capturePos -ge $firstStepPos) {
         throw 'automatic capture does not occur before RecordedSteps begin'
-    }
-    if ($spawnPos -lt 0 -or $capturePos -ge $spawnPos) {
-        throw 'automatic capture unexpectedly occurs at/after SpawnTower'
     }
 
     foreach ($marker in @('; <StrategyLabMainGuiGuard>','; <StrategyLabAutoMapCapture>','; <StrategyLabRemoteBoundary>')) {
@@ -141,7 +171,7 @@ SpawnTower(X, Y, slotNumber, towerID) {
         }
     }
 
-    Write-Host 'PASS: preflight migrates capture to the pristine post-LoadGame boundary and keeps all hooks idempotent.' -ForegroundColor Green
+    Write-Host 'PASS: preflight uses the real pre-activateTimescale RunStrategy boundary and keeps all hooks idempotent.' -ForegroundColor Green
 }
 finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
