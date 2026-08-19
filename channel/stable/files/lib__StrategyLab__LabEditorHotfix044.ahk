@@ -77,7 +77,7 @@ Lab044CanvasMouseDown(wParam, lParam, msg, hwnd) {
     global LabEditorPanActive, LabEditorPanStartX, LabEditorPanStartY
     global LabEditorPanStartCenterX, LabEditorPanStartCenterY
     global LabEditorPanLastMouseX, LabEditorPanLastMouseY, LabEditorViewport, MainGui
-    global Lab044PanLastPaint
+    global Lab044DragLastPaint, Lab044DragLastFieldUpdate, Lab044PanLastPaint
 
     if Lab044StrategyRunning()
         return
