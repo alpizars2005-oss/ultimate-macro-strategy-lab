@@ -420,12 +420,11 @@ StrategyEditorMaybeAutoSyncAssets() {
     mapName := StrategyEditorMapName()
     if !LabEditorControlAlive(LabEditorAssetBadge)
         return
-    if (mapName = "")
-        try LabEditorAssetBadge.Text := "Map source: unknown"
-    else if (LabMapCameraPath(mapName) != "")
-        try LabEditorAssetBadge.Text := "Map source: exact screenshot"
-    else
-        try LabEditorAssetBadge.Text := "Map source: capture required"
+
+    badgeText := mapName = ""
+        ? "Map source: unknown"
+        : (LabMapCameraPath(mapName) != "" ? "Map source: exact screenshot" : "Map source: capture required")
+    try LabEditorAssetBadge.Text := badgeText
 }
 
 ; Kept under the old name because the UI/workspace already references LabEditorSyncBtn.
