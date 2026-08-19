@@ -11,30 +11,32 @@
 #Include "%A_ScriptDir%\lib\StrategyLab\LabRemoteGate.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabStatsTab.ahk"
 
-; Integrated Strategy Editor tab for Main_Lab.ahk.
-; Keep StrategyEditorCore above StrategyEditorUi: the UI constructs LabStratDocument
-; at runtime and must never rely on a test harness or another include to provide it.
+; Strategy Lab 0.4 single-canvas editor.
 ;
-; AHK v2 throws before a helper can run if an unset global is passed as an argument.
-; Every GUI-control global used by early timers is therefore initialized before any
-; editor module that can schedule work is included.
+; The map screenshot, placement-radius circles and numbered markers are composited into
+; ONE bitmap. There are no per-placement Gui.Controls and no transparent sibling ring
+; HWNDs. Hit-testing is geometric, which keeps drag/layer/zoom independent from Windows
+; control z-order and eliminates the visual stacking/tearing seen in the 0.3.x editor.
 
 global LabEditorCtrls := []
-global LabEditorMarkerCtrls := []
-global LabEditorMarkerByHwnd := Map()
+global LabEditorMarkerCtrls := []          ; compatibility: intentionally always empty
+global LabEditorMarkerByHwnd := Map()     ; compatibility: intentionally always empty
+global LabEditorHitRegions := []
 global LabEditorDoc := ""
 global LabEditorLayer := "All placements"
 global LabEditorSelectedRow := 0
 global LabEditorDragPlacement := ""
-global LabEditorDragMarker := ""
+global LabEditorDragIndex := 0
 global LabEditorDragOldX := 0
 global LabEditorDragOldY := 0
+global LabEditorDragPreviewX := ""
+global LabEditorDragPreviewY := ""
 global LabEditorViewport := LabMapViewport()
 global LabEditorSourceImage := ""
 global LabEditorBackgroundMode := "none"
 global LabEditorExpanded := false
 global LabEditorCurrentMap := ""
-global LabEditorAssetSyncPid := 0
+global LabEditorAssetSyncPid := 0          ; legacy compatibility; web editor sync retired
 global LabEditorAssetsRequested := false
 
 global LabEditorViewportPath := A_AppData "\Ultimate_Macro\StrategyEditor\viewport-a.jpg"
@@ -46,8 +48,8 @@ global LabEditorCanvasY := 205
 global LabEditorCanvasW := 438
 global LabEditorCanvasH := 238
 
-; Controls are assigned real Gui.Control objects by StrategyEditorCreateTab().
-; Empty-string sentinels make startup/teardown checks safe before that happens.
+; Controls are assigned by StrategyEditorCreateTab(). Every global used by an early
+; timer starts as a safe sentinel so AHK v2 can never throw on an unset variable.
 global LabEditorOpenBtn := ""
 global LabEditorCurrentBtn := ""
 global LabEditorSnapshotBtn := ""
@@ -93,7 +95,6 @@ global LabEditorLayerLabel := ""
 
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorUi.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorPlacements.ahk"
-#Include "%A_ScriptDir%\lib\StrategyLab\LabSimpleFootprints.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorMaps.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorSave.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabEditorStability.ahk"
