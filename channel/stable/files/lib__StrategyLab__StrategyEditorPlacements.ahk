@@ -1,25 +1,21 @@
 #Requires AutoHotkey v2.0
 
-; Strategy Editor placement renderer.
-; One marker HWND + one optional footprint HWND per placement. No dependency on
-; upstream CurrentTab: the Editor's own visible canvas is the source of truth.
+; Strategy Lab 0.4 placement model.
+; Visuals are rendered into the map frame by StrategyEditorMaps.ahk. This file owns
+; layers, selection, hit-testing and drag state only. No placement creates a Gui.Control.
 
 global LabEditorDragLastFrame := 0
 global LabEditorDragLastStatus := 0
-global LabEditorDragPreviewX := ""
-global LabEditorDragPreviewY := ""
-global LabEditorDragRing := ""
 global LabEditorLayerOptions := ["All placements"]
 global LabEditorListRowMap := []
 global LabEditorLayerChangeBusy := false
-global LabEditorRingMode := "selected"
-global LabEditorRingTemplatePath := ""
+global LabEditorRingMode := "all"
 
 StrategyEditorBuildLayers() {
     global LabEditorDoc, LabEditorLayerCtrl, LabEditorLayer, LabEditorLayerOptions
     global LabEditorLayerChangeBusy
 
-    if !IsObject(LabEditorDoc) || !IsObject(LabEditorLayerCtrl)
+    if !IsObject(LabEditorDoc) || !LabEditorControlAlive(LabEditorLayerCtrl)
         return
 
     options := ["All placements"]
@@ -58,6 +54,8 @@ StrategyEditorBuildLayers() {
 
 StrategyEditorResolveLayerSelection() {
     global LabEditorLayerCtrl, LabEditorLayerOptions
+    if !LabEditorControlAlive(LabEditorLayerCtrl)
+        return "All placements"
 
     selectedText := ""
     try selectedText := Trim(LabEditorLayerCtrl.Text)
@@ -77,6 +75,8 @@ StrategyEditorResolveLayerSelection() {
 
 StrategyEditorMarkerLabel(placement) {
     global LabEditorDoc
+    if !IsObject(LabEditorDoc)
+        return "?"
     rawTower := LabEditorDoc.TowerNameForSlot(placement.slot)
     if (rawTower = "")
         return String(placement.slot)
@@ -86,35 +86,18 @@ StrategyEditorMarkerLabel(placement) {
     return String(LabTowerOccurrence(LabEditorDoc, placement))
 }
 
-StrategyEditorMarkerClicked(index, *) {
-    StrategyEditorSelectPlacement(index)
-}
-
-StrategyEditorSetCircularRegion(ctrl, size) {
-    if !IsObject(ctrl) || size <= 0
-        return
-    region := DllCall("gdi32\CreateEllipticRgn", "Int", 0, "Int", 0, "Int", size + 1, "Int", size + 1, "Ptr")
-    if !region
-        return
-    if !DllCall("user32\SetWindowRgn", "Ptr", ctrl.Hwnd, "Ptr", region, "Int", 1)
-        DllCall("gdi32\DeleteObject", "Ptr", region)
-}
-
-; 0.3.9 intentionally has no generated/AppData halo fallback. A fresh install ships
-; one neutral transparent outline. If it is missing, markers still work without rings.
-StrategyEditorRingImagePath() {
-    global LabEditorRingTemplatePath
-    path := A_ScriptDir "\Resources\StrategyLab\Towers\footprint-guide.png"
-    if FileExist(path) {
-        LabEditorRingTemplatePath := path
-        return path
-    }
-    LabEditorRingTemplatePath := ""
-    return ""
+StrategyEditorSlotColor(slot, alpha := 255) {
+    colors := [0xE45757, 0x4E7DD1, 0x54A76A, 0xB06AC2, 0xD3A64B]
+    slotNum := IsNumber(slot) ? Integer(slot) : 1
+    rgb := colors[Max(1, Min(colors.Length, slotNum))]
+    a := Max(0, Min(255, Integer(alpha)))
+    return (a << 24) | rgb
 }
 
 StrategyEditorPlacementFootprint(placement) {
     global LabEditorDoc
+    if !IsObject(LabEditorDoc)
+        return 1.5
     tower := LabEditorDoc.TowerNameForSlot(placement.slot)
     return tower != "" ? LabTowerPlacementFootprint(tower) : 1.5
 }
@@ -122,9 +105,15 @@ StrategyEditorPlacementFootprint(placement) {
 StrategyEditorFootprintDiameter(placement) {
     global LabEditorViewport
     footprint := StrategyEditorPlacementFootprint(placement)
-    ; Average footprint 1.5 is 28px at 100%. Zoom scales the guide with the map.
+    ; Keep the same familiar footprint scale as the original square-marker editor,
+    ; but draw it as an actual circle inside the map frame.
     diameter := Round(28 * (footprint / 1.5) * LabEditorViewport.Zoom)
     return Max(18, Min(150, diameter))
+}
+
+StrategyEditorMarkerDiameter(index) {
+    global LabEditorSelectedRow
+    return index = LabEditorSelectedRow ? 22 : 18
 }
 
 StrategyEditorRingModeAllows(index) {
@@ -139,125 +128,62 @@ StrategyEditorRingModeAllows(index) {
 StrategyEditorRingButtonText() {
     global LabEditorRingMode
     if (LabEditorRingMode = "selected")
-        return "Footprint: 1"
+        return "Radii: 1"
     if (LabEditorRingMode = "off")
-        return "Footprint: Off"
-    return "Footprint: All"
+        return "Radii: Off"
+    return "Radii: All"
 }
 
 StrategyEditorToggleRings(*) {
     global LabEditorRingMode, LabEditorRingsBtn
-    ; Selected is the default and first click intentionally reveals All.
-    LabEditorRingMode := LabEditorRingMode = "selected" ? "all" : (LabEditorRingMode = "all" ? "off" : "selected")
-    if IsObject(LabEditorRingsBtn)
-        LabEditorRingsBtn.Text := StrategyEditorRingButtonText()
-    StrategyEditorApplyLayer()
-    label := LabEditorRingMode = "all" ? "all tower footprints" : (LabEditorRingMode = "selected" ? "selected tower footprint" : "tower footprints hidden")
-    StrategyEditorSetStatus("Placement guides: " label ".")
+    LabEditorRingMode := LabEditorRingMode = "all" ? "selected" : (LabEditorRingMode = "selected" ? "off" : "all")
+    if LabEditorControlAlive(LabEditorRingsBtn)
+        try LabEditorRingsBtn.Text := StrategyEditorRingButtonText()
+    StrategyEditorRenderBackground()
+    label := LabEditorRingMode = "all" ? "all unit radii" : (LabEditorRingMode = "selected" ? "selected unit radius" : "unit radii hidden")
+    StrategyEditorSetStatus("Canvas guides: " label ".")
 }
 
+; Compatibility name. In 0.4 this does not build Windows controls; it just refreshes
+; the ListView and asks the single canvas to render placements.
 StrategyEditorBuildMarkers() {
-    global LabEditorDoc, LabEditorMarkerCtrls, LabEditorMarkerByHwnd, MainGui
-
-    StrategyEditorClearMarkers()
+    global LabEditorMarkerCtrls, LabEditorMarkerByHwnd, LabEditorHitRegions
     LabEditorMarkerCtrls := []
     LabEditorMarkerByHwnd := Map()
-    ringPath := StrategyEditorRingImagePath()
-
-    colors := ["B04747", "476FB0", "4A8F59", "9C6CB0", "B08A47"]
-    for index, placement in LabEditorDoc.Placements {
-        point := StrategyEditorPlacementPoint(placement)
-        slotNum := IsNumber(placement.slot) ? Integer(placement.slot) : 1
-        color := colors[Max(1, Min(colors.Length, slotNum))]
-
-        ring := ""
-        if (ringPath != "") {
-            diameter := StrategyEditorFootprintDiameter(placement)
-            ring := MainGui.Add("Picture", "x" (point.x - Floor(diameter / 2)) " y" (point.y - Floor(diameter / 2))
-                " w" diameter " h" diameter " Hidden Disabled BackgroundTrans", ringPath)
-        }
-
-        marker := MainGui.Add("Text", "x" (point.x - 9) " y" (point.y - 9)
-            " w18 h18 Hidden Center Background" color " cFFFFFF", StrategyEditorMarkerLabel(placement))
-        marker.SetFont("s7 w700", "Segoe UI")
-        StrategyEditorSetCircularRegion(marker, 18)
-        marker.OnEvent("Click", StrategyEditorMarkerClicked.Bind(index))
-
-        entry := {ctrl: marker, ring: ring, placement: placement, index: index, color: color}
-        LabEditorMarkerCtrls.Push(entry)
-        LabEditorMarkerByHwnd[marker.Hwnd] := entry
-    }
-
+    LabEditorHitRegions := []
     StrategyEditorRefreshLayerList()
-    StrategyEditorRefreshMarkerSelection()
-    StrategyEditorApplyLayer()
+    StrategyEditorRenderBackground()
 }
 
 StrategyEditorClearMarkers() {
-    global LabEditorMarkerCtrls, LabEditorMarkerByHwnd, LabEditorListRowMap
-    for entry in LabEditorMarkerCtrls {
-        if IsObject(entry.ring) {
-            try entry.ring.Visible := false
-            try DllCall("DestroyWindow", "Ptr", entry.ring.Hwnd)
-        }
-        if IsObject(entry.ctrl) {
-            try entry.ctrl.Visible := false
-            try DllCall("DestroyWindow", "Ptr", entry.ctrl.Hwnd)
-        }
-    }
+    global LabEditorMarkerCtrls, LabEditorMarkerByHwnd, LabEditorHitRegions, LabEditorListRowMap
     LabEditorMarkerCtrls := []
     LabEditorMarkerByHwnd := Map()
+    LabEditorHitRegions := []
     LabEditorListRowMap := []
 }
 
 StrategyEditorRefreshMarkerSelection() {
-    global LabEditorMarkerCtrls, LabEditorSelectedRow
-    for index, entry in LabEditorMarkerCtrls {
-        point := StrategyEditorPlacementPoint(entry.placement)
-        size := index = LabEditorSelectedRow ? 22 : 18
-        if IsObject(entry.ctrl) {
-            entry.ctrl.Move(point.x - Floor(size / 2), point.y - Floor(size / 2), size, size)
-            StrategyEditorSetCircularRegion(entry.ctrl, size)
-            isPortrait := false
-            try isPortrait := entry.labUniquePortraitReady
-            if !isPortrait
-                try entry.ctrl.SetFont(index = LabEditorSelectedRow ? "s8 w700" : "s7 w700", "Segoe UI")
-        }
-        if IsObject(entry.ring) {
-            diameter := StrategyEditorFootprintDiameter(entry.placement)
-            entry.ring.Move(point.x - Floor(diameter / 2), point.y - Floor(diameter / 2), diameter, diameter)
-        }
-    }
+    StrategyEditorRenderBackground()
 }
 
 StrategyEditorRaiseVisibleMarkers() {
-    global LabEditorMarkerCtrls
-    for entry in LabEditorMarkerCtrls {
-        if !IsObject(entry.ctrl)
-            continue
-        visible := false
-        try visible := entry.ctrl.Visible
-        if visible {
-            try DllCall("user32\SetWindowPos", "Ptr", entry.ctrl.Hwnd, "Ptr", 0,
-                "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UInt", 0x13)
-        }
-    }
+    ; No-op by design: placements are pixels in the single canvas, not sibling HWNDs.
 }
 
 StrategyEditorRefreshMarkerLayout() {
-    StrategyEditorRefreshMarkerSelection()
-    StrategyEditorApplyLayer()
+    StrategyEditorRenderBackground(false)
 }
 
 StrategyEditorRefreshLayerList(selectDocIndex := 0) {
     global LabEditorDoc, LabEditorList, LabEditorListRowMap, LabEditorSelectedRow
-    if !IsObject(LabEditorDoc)
+    if !IsObject(LabEditorDoc) || !LabEditorControlAlive(LabEditorList)
         return
 
     if (selectDocIndex <= 0)
         selectDocIndex := LabEditorSelectedRow
 
-    LabEditorList.Delete()
+    try LabEditorList.Delete()
     LabEditorListRowMap := []
     visibleRow := 0
 
@@ -275,24 +201,18 @@ StrategyEditorRefreshLayerList(selectDocIndex := 0) {
 }
 
 StrategyEditorRefreshVisuals(rebuildList := true) {
-    global LabEditorDoc, LabEditorMarkerCtrls
+    global LabEditorDoc
     if !IsObject(LabEditorDoc)
         return
-
-    for index, placement in LabEditorDoc.Placements {
-        if (index > LabEditorMarkerCtrls.Length)
-            continue
-        entry := LabEditorMarkerCtrls[index]
-        entry.placement := placement
-        entry.index := index
-    }
     if rebuildList
         StrategyEditorRefreshLayerList()
-    StrategyEditorRefreshMarkerLayout()
+    StrategyEditorRenderBackground()
 }
 
 StrategyEditorPlacementVisible(placement) {
     global LabEditorDoc, LabEditorLayer
+    if !IsObject(LabEditorDoc)
+        return false
     if (LabEditorLayer = "All placements")
         return true
     slot := String(placement.slot)
@@ -301,26 +221,13 @@ StrategyEditorPlacementVisible(placement) {
 }
 
 StrategyEditorApplyLayer() {
-    global LabEditorMarkerCtrls
-
-    ; The canvas itself tells us whether the Editor tab is active. This intentionally
-    ; avoids upstream CurrentTab, whose numbering changed when Editor/Stats were added.
-    editorActive := false
-    try editorActive := StrategyEditorIsActive()
-
-    for entry in LabEditorMarkerCtrls {
-        point := StrategyEditorPlacementPoint(entry.placement)
-        showPlacement := editorActive && point.visible && StrategyEditorPlacementVisible(entry.placement)
-        if IsObject(entry.ctrl)
-            entry.ctrl.Visible := showPlacement
-        if IsObject(entry.ring)
-            entry.ring.Visible := showPlacement && StrategyEditorRingModeAllows(entry.index)
-    }
-    StrategyEditorRaiseVisibleMarkers()
+    ; Layer filtering is now applied while painting the canvas and while populating the
+    ; ListView, so the two views can never disagree because of stale native controls.
+    StrategyEditorRenderBackground()
 }
 
 StrategyEditorLayerChanged(*) {
-    global LabEditorLayerCtrl, LabEditorLayer, LabEditorLayerOptions, LabEditorDoc, LabEditorSelectedRow
+    global LabEditorLayer, LabEditorDoc, LabEditorSelectedRow
     global LabEditorListRowMap, LabEditorLayerChangeBusy
 
     if LabEditorLayerChangeBusy || !IsObject(LabEditorDoc)
@@ -343,9 +250,6 @@ StrategyEditorLayerChanged(*) {
         LabEditorSelectedRow := firstVisible
 
     StrategyEditorRefreshLayerList(LabEditorSelectedRow)
-    StrategyEditorRefreshMarkerSelection()
-    StrategyEditorApplyLayer()
-
     if (LabEditorSelectedRow > 0) {
         placement := LabEditorDoc.Placements[LabEditorSelectedRow]
         StrategyEditorShowTower(placement)
@@ -353,6 +257,7 @@ StrategyEditorLayerChanged(*) {
         if (visibleRow > 0)
             try LabEditorList.Modify(visibleRow, "Vis Select Focus")
     }
+    StrategyEditorRenderBackground()
 
     count := LabEditorListRowMap.Length
     StrategyEditorSetStatus("Layer: " LabEditorLayer " • " count " placement" (count = 1 ? "" : "s") ".")
@@ -380,14 +285,15 @@ StrategyEditorSelectPlacement(row) {
         return
     LabEditorSelectedRow := row
     placement := LabEditorDoc.Placements[row]
-    LabEditorXCtrl.Text := placement.x
-    LabEditorYCtrl.Text := placement.y
+    if LabEditorControlAlive(LabEditorXCtrl)
+        try LabEditorXCtrl.Text := placement.x
+    if LabEditorControlAlive(LabEditorYCtrl)
+        try LabEditorYCtrl.Text := placement.y
     StrategyEditorShowTower(placement)
-    StrategyEditorRefreshMarkerSelection()
-    StrategyEditorApplyLayer()
     visibleRow := StrategyEditorVisibleListRow(row)
-    if visibleRow > 0
+    if (visibleRow > 0 && LabEditorControlAlive(LabEditorList))
         try LabEditorList.Modify(visibleRow, "Vis Select Focus")
+    StrategyEditorRenderBackground()
 }
 
 StrategyEditorApplyCoordinates(*) {
@@ -396,6 +302,8 @@ StrategyEditorApplyCoordinates(*) {
         StrategyEditorSetStatus("Select a placement first.", true)
         return
     }
+    if !LabEditorControlAlive(LabEditorXCtrl) || !LabEditorControlAlive(LabEditorYCtrl)
+        return
     if !IsNumber(LabEditorXCtrl.Text) || !IsNumber(LabEditorYCtrl.Text) {
         StrategyEditorSetStatus("X and Y must be numbers.", true)
         return
@@ -441,6 +349,8 @@ StrategyEditorRedo(*) {
 
 StrategyEditorFindPlacementRow(placement) {
     global LabEditorDoc
+    if !IsObject(LabEditorDoc)
+        return 0
     for index, candidate in LabEditorDoc.Placements {
         if (candidate = placement)
             return index
@@ -448,17 +358,53 @@ StrategyEditorFindPlacementRow(placement) {
     return 0
 }
 
+StrategyEditorHitTestPlacement(mx, my) {
+    global LabEditorHitRegions
+    bestIndex := 0
+    bestDistance := 0x7FFFFFFF
+    for region in LabEditorHitRegions {
+        dx := mx - region.x
+        dy := my - region.y
+        distance := (dx * dx) + (dy * dy)
+        limit := region.radius * region.radius
+        if (distance <= limit && distance < bestDistance) {
+            bestDistance := distance
+            bestIndex := region.index
+        }
+    }
+    return bestIndex
+}
+
+StrategyEditorBeginDrag(index) {
+    global LabEditorDoc, LabEditorDragPlacement, LabEditorDragIndex
+    global LabEditorDragOldX, LabEditorDragOldY, LabEditorDragPreviewX, LabEditorDragPreviewY, MainGui
+
+    if !IsObject(LabEditorDoc) || index < 1 || index > LabEditorDoc.Placements.Length
+        return false
+
+    placement := LabEditorDoc.Placements[index]
+    LabEditorDragPlacement := placement
+    LabEditorDragIndex := index
+    LabEditorDragOldX := placement.x
+    LabEditorDragOldY := placement.y
+    LabEditorDragPreviewX := placement.x
+    LabEditorDragPreviewY := placement.y
+    StrategyEditorSelectPlacement(index)
+    try DllCall("SetCapture", "Ptr", MainGui.Hwnd)
+    return true
+}
+
 StrategyEditorMouseMove(wParam, lParam, msg, hwnd) {
-    global LabEditorDoc, LabEditorDragPlacement, LabEditorDragMarker, LabEditorDragRing
+    global LabEditorDoc, LabEditorDragPlacement, LabEditorDragIndex
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
     global LabEditorDragLastFrame, LabEditorDragLastStatus, LabEditorDragPreviewX, LabEditorDragPreviewY
     global LabEditorXCtrl, LabEditorYCtrl
 
-    if !IsObject(LabEditorDoc) || !IsObject(LabEditorDragPlacement) || !IsObject(LabEditorDragMarker)
+    if !IsObject(LabEditorDoc) || !IsObject(LabEditorDragPlacement) || LabEditorDragIndex < 1
         return
 
     now := A_TickCount
-    if (LabEditorDragLastFrame && now - LabEditorDragLastFrame < 16)
+    if (LabEditorDragLastFrame && now - LabEditorDragLastFrame < 24)
         return 0
     LabEditorDragLastFrame := now
 
@@ -469,49 +415,44 @@ StrategyEditorMouseMove(wParam, lParam, msg, hwnd) {
     LabEditorDragPreviewX := logical.x
     LabEditorDragPreviewY := logical.y
 
-    LabEditorDragMarker.Move(mx - 11, my - 11, 22, 22)
-    StrategyEditorSetCircularRegion(LabEditorDragMarker, 22)
-    if IsObject(LabEditorDragRing) {
-        diameter := StrategyEditorFootprintDiameter(LabEditorDragPlacement)
-        LabEditorDragRing.Move(mx - Floor(diameter / 2), my - Floor(diameter / 2), diameter, diameter)
-    }
-
     if (!LabEditorDragLastStatus || now - LabEditorDragLastStatus >= 75) {
         LabEditorDragLastStatus := now
-        try LabEditorXCtrl.Text := LabEditorDragPreviewX
-        try LabEditorYCtrl.Text := LabEditorDragPreviewY
+        if LabEditorControlAlive(LabEditorXCtrl)
+            try LabEditorXCtrl.Text := LabEditorDragPreviewX
+        if LabEditorControlAlive(LabEditorYCtrl)
+            try LabEditorYCtrl.Text := LabEditorDragPreviewY
         StrategyEditorSetStatus("Preview " LabEditorDragPlacement.towerId " → (" LabEditorDragPreviewX ", " LabEditorDragPreviewY ")")
     }
+
+    StrategyEditorRenderBackground(false)
     return 0
 }
 
 StrategyEditorMouseUp(wParam, lParam, msg, hwnd) {
-    global LabEditorDoc, LabEditorDragPlacement, LabEditorDragMarker, LabEditorDragRing
+    global LabEditorDoc, LabEditorDragPlacement, LabEditorDragIndex
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
     global LabEditorDragLastFrame, LabEditorDragLastStatus, LabEditorDragPreviewX, LabEditorDragPreviewY
 
-    if !IsObject(LabEditorDoc) || !IsObject(LabEditorDragPlacement) || !IsObject(LabEditorDragMarker)
+    if !IsObject(LabEditorDoc) || !IsObject(LabEditorDragPlacement) || LabEditorDragIndex < 1
         return
 
     StrategyEditorGetClientCursor(&mx, &my)
     mx := Max(LabEditorCanvasX, Min(LabEditorCanvasX + LabEditorCanvasW, mx))
     my := Max(LabEditorCanvasY, Min(LabEditorCanvasY + LabEditorCanvasH, my))
     logical := StrategyEditorViewportToStrategy(mx, my)
-    newX := logical.x
-    newY := logical.y
 
     placement := LabEditorDragPlacement
-    changed := LabEditorDoc.MovePlacement(placement, newX, newY)
+    changed := LabEditorDoc.MovePlacement(placement, logical.x, logical.y)
     try DllCall("ReleaseCapture")
+
+    row := LabEditorDragIndex
     LabEditorDragPlacement := ""
-    LabEditorDragMarker := ""
-    LabEditorDragRing := ""
+    LabEditorDragIndex := 0
     LabEditorDragLastFrame := 0
     LabEditorDragLastStatus := 0
     LabEditorDragPreviewX := ""
     LabEditorDragPreviewY := ""
 
-    row := StrategyEditorFindPlacementRow(placement)
     StrategyEditorRefreshVisuals()
     StrategyEditorSelectPlacement(row)
     if changed
