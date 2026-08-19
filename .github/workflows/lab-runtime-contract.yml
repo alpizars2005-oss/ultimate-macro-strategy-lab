@@ -46,6 +46,9 @@ jobs:
           ui = (stable / 'lib__StrategyLab__StrategyEditorUi.ahk').read_text(encoding='utf-8-sig')
           placements = (stable / 'lib__StrategyLab__StrategyEditorPlacements.ahk').read_text(encoding='utf-8-sig')
           maps = (stable / 'lib__StrategyLab__StrategyEditorMaps.ahk').read_text(encoding='utf-8-sig')
+          footprints = (stable / 'lib__StrategyLab__LabFootprintGeometry.ahk').read_text(encoding='utf-8-sig')
+          map_library = (stable / 'lib__StrategyLab__MapLibrary.ahk').read_text(encoding='utf-8-sig')
+          auto_capture = (stable / 'lib__StrategyLab__LabAutoMapCapture.ahk').read_text(encoding='utf-8-sig')
           interaction = (stable / 'lib__StrategyLab__StrategyEditorInteraction.ahk').read_text(encoding='utf-8-sig')
           workspace = (stable / 'lib__StrategyLab__StrategyEditorWorkspace.ahk').read_text(encoding='utf-8-sig')
           stability = (stable / 'lib__StrategyLab__LabEditorStability.ahk').read_text(encoding='utf-8-sig')
@@ -55,6 +58,7 @@ jobs:
           reward_tracker = (stable / 'lib__StrategyLab__LabRewardTracker.ahk').read_text(encoding='utf-8-sig')
           rewards_ini = (stable / 'Resources__StrategyLab__Rewards__catalog.ini').read_text(encoding='utf-8-sig')
           remote_settings = (stable / 'submacros__lab_remote_settings.ps1').read_text(encoding='utf-8-sig')
+          tower_assets = (stable / 'submacros__lab_tower_assets.ps1').read_text(encoding='utf-8-sig')
           preflight = (stable / 'submacros__lab_preflight.ps1').read_text(encoding='utf-8-sig')
           clean_installer = Path('tools/install_clean_strategy_lab.ps1').read_text(encoding='utf-8-sig')
 
@@ -64,8 +68,7 @@ jobs:
           assert 'FileRead(path, "RAW")' in validation
           assert 'LabStrategyTrimTerminalNuls' in validation
 
-          # 0.4 architecture: no placement/ring HWNDs. One screenshot Picture owns all
-          # placement graphics; interaction is geometric.
+          # Single-canvas architecture: no placement HWNDs, geometric layer/drag hit testing.
           assert 'LabSimpleFootprints.ahk' not in tab
           assert 'MainGui.Add("Text"' not in placements
           assert 'MainGui.Add("Picture"' not in placements
@@ -74,21 +77,41 @@ jobs:
           assert 'StrategyEditorHitTestPlacement' in placements
           assert 'StrategyEditorBeginDrag' in placements
           assert 'Gdip_FillEllipse' in maps and 'Gdip_DrawEllipse' in maps
-          assert 'StrategyEditorRenderCompositeFrame' in maps
           assert 'LabEditorHitRegions.Push' in maps
           assert 'StrategyEditorHitTestPlacement(mx, my)' in interaction
           assert 'StrategyEditorSlotColor' in placements
-          assert 'return "Radii: All"' in placements
+          assert 'return "Footprints: All"' in placements
 
-          # Editor map/tower visuals are local only: exact screenshot + generated badges.
+          # 0.4.3 true-footprint model + in-memory bitmap swap.
+          assert 'LabFootprintCanvasEllipse' in footprints and 'LabFootprintCollisionMap' in footprints
+          assert 'LabFootprintPixelsPerUnit := 12.0' in footprints
+          assert 'LabFootprintCanvasEllipse' in maps and 'LabFootprintCollisionMap' in maps
+          assert 'GdipCreateHBITMAPFromBitmap' in maps
+          assert '0x0172' in maps  # STM_SETIMAGE
+          assert 'LabEditorSnapshot.Value := renderPath' not in maps
+          assert 'lib/StrategyLab/LabFootprintGeometry.ahk|' in mapping
+
+          # Exact map stays local. Only strategy-scoped tower portraits may use the wiki.
           assert 'LabMapCameraPath(mapName)' in maps
           assert 'LabMapPreferredBackground' not in maps
-          assert 'LabTowerPortraitPath' not in maps
+          assert 'LabTowerPortraitPath' in maps
           assert 'lab_assets.ps1' not in maps
           assert 'submacros/lab_assets.ps1|' not in mapping
-          assert 'lib/StrategyLab/LabSimpleFootprints.ahk|' not in mapping
+          assert 'submacros/lab_tower_assets.ps1|' in mapping
+          assert 'tds.fandom.com' in tower_assets
+          assert 'MapLibrary' not in tower_assets
+          assert 'LabEditorTowerPortrait := gui.Add("Picture"' in ui
           assert 'Map source: exact screenshot' in maps
-          assert 'StrategyEditorSetCircularRegion(LabEditorTowerPortrait, 62)' in ui
+
+          # Map captures are atomic/local and 0.4.2 legacy lobby images are refreshable.
+          assert 'LabMapSaveCameraBitmap' in map_library
+          assert 'LabMapReleaseRenderCache()' in map_library
+          assert 'WriterVersion' in map_library and '0.4.3' in map_library
+          assert 'LabMapCameraNeedsRefresh' in auto_capture
+          assert 'LabMapSaveCameraBitmap(name, pBitmap, "spawn")' in auto_capture
+          assert 'LabMapAutoCaptureCurrent()' in preflight
+          assert 'SpawnTower' in preflight
+          assert 'LabMapAutoCaptureIfMissing(gamemap)' not in preflight
 
           # Native lifecycle guards cover Editor and Stats teardown.
           assert 'LabEditorControlAlive' in stability and 'user32\\IsWindow' in stability
@@ -126,6 +149,7 @@ jobs:
         shell: pwsh
         run: |
           $files = @(
+            'channel/stable/files/submacros__lab_tower_assets.ps1',
             'channel/stable/files/submacros__lab_reward_assets.ps1',
             'channel/stable/files/submacros__lab_update.ps1',
             'channel/stable/files/submacros__lab_preflight.ps1',
