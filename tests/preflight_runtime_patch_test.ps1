@@ -62,6 +62,12 @@ RunStrategy() {
     foreach ($pass in 1..2) {
         & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $preflightTarget -InstallDir $root
         if ($LASTEXITCODE -ne 0) {
+            $preflightLog = Join-Path $env:APPDATA 'Ultimate_Macro\StrategyEditor\preflight.log'
+            if (Test-Path -LiteralPath $preflightLog) {
+                Write-Host '----- preflight.log -----' -ForegroundColor Yellow
+                Get-Content -LiteralPath $preflightLog | Select-Object -Last 80 | ForEach-Object { Write-Host $_ }
+                Write-Host '-------------------------' -ForegroundColor Yellow
+            }
             throw "preflight test pass $pass failed with exit code $LASTEXITCODE"
         }
     }
