@@ -2,23 +2,16 @@
 #SingleInstance Force
 #Warn All, Off
 
-; Runtime smoke test for the exact startup window that produced 0.3.11's
-; "global LabEditorCanvasBg has not been assigned" crash. The workflow stages this
-; script next to an install-style lib\StrategyLab tree, then deliberately does NOT call
-; StrategyEditorCreateTab(). Early timers must all fail closed.
+; Runtime smoke test for Editor startup/teardown before StrategyEditorCreateTab().
 
 StartStrategy(ctrl, *) {
 }
-
 StopStrategy(ctrl, *) {
 }
-
 KillSubmacros(*) {
 }
-
 LoadStrategyFile(path) {
 }
-
 getRobloxPos(&x, &y, &w, &h) {
     x := 0, y := 0, w := 1920, h := 1009
 }
@@ -34,7 +27,12 @@ Gdip_SaveBitmapToFile(*) => 0
 Gdip_DeleteGraphics(*) => 0
 Gdip_BrushCreateSolid(*) => 1
 Gdip_FillRectangle(*) => 0
+Gdip_FillEllipse(*) => 0
 Gdip_DeleteBrush(*) => 0
+Gdip_CreatePen(*) => 1
+Gdip_DrawEllipse(*) => 0
+Gdip_DeletePen(*) => 0
+Gdip_TextToGraphics(*) => 0
 Gdip_BitmapFromScreen(*) => 1
 
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorTab.ahk"
@@ -44,8 +42,6 @@ fail(message) {
     ExitApp(1)
 }
 
-; Top-level control sentinels must already be assigned before any timer can call into
-; StrategyEditorIsActive/WorkspaceMonitor.
 if !IsSet(LabEditorCanvasBg)
     fail("LabEditorCanvasBg is unset before StrategyEditorCreateTab")
 if !IsSet(LabEditorSnapshot)
@@ -53,7 +49,6 @@ if !IsSet(LabEditorSnapshot)
 if IsObject(LabEditorCanvasBg) || IsObject(LabEditorSnapshot)
     fail("pre-create control sentinels unexpectedly contain Gui.Control objects")
 
-; Exercise the functions synchronously before the first timer tick.
 try active := StrategyEditorIsActive()
 catch Error as err
     fail("StrategyEditorIsActive threw before GUI creation: " err.Message)
@@ -64,12 +59,8 @@ try StrategyEditorWorkspaceMonitor()
 catch Error as err
     fail("StrategyEditorWorkspaceMonitor threw before GUI creation: " err.Message)
 
-; Let the 75/250/400ms startup timers actually execute. This is the part /Validate
-; cannot cover and is where the user's crash happened.
 Sleep(650)
 
-; Reproduce the other 0.3.11 bug class: a Gui.Control object can survive after the
-; native HWND is destroyed. Activity checks must return false instead of throwing.
 probeGui := Gui()
 probeCtrl := probeGui.Add("Text", "w10 h10", "x")
 LabEditorCanvasBg := probeCtrl
@@ -87,5 +78,5 @@ try StrategyEditorWorkspaceMonitor()
 catch Error as err
     fail("Workspace monitor threw after destroyed-control recovery: " err.Message)
 
-FileAppend("PASS: editor pre-create and destroyed-control lifecycle guards`n", "*")
+FileAppend("PASS: editor startup/teardown guards`n", "*")
 ExitApp(0)
