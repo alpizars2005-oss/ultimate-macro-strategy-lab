@@ -3,11 +3,9 @@
 #Warn All, Off
 
 ; Runtime smoke test for the exact startup window that produced 0.3.11's
-; "global LabEditorCanvasBg has not been assigned" crash. The Strategy Editor modules
-; are loaded normally, but StrategyEditorCreateTab() is deliberately NOT called.
-;
-; The test then waits long enough for the early workspace/navigation timers to fire.
-; All of them must fail closed while GUI-control globals are still sentinel values.
+; "global LabEditorCanvasBg has not been assigned" crash. The workflow stages this
+; script next to an install-style lib\StrategyLab tree, then deliberately does NOT call
+; StrategyEditorCreateTab(). Early timers must all fail closed.
 
 StartStrategy(ctrl, *) {
 }
@@ -39,7 +37,7 @@ Gdip_FillRectangle(*) => 0
 Gdip_DeleteBrush(*) => 0
 Gdip_BitmapFromScreen(*) => 1
 
-#Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorTab.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorTab.ahk"
 
 fail(message) {
     try FileAppend("FAIL: " message "`n", "*")
