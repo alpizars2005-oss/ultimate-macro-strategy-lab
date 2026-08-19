@@ -10,28 +10,27 @@ def read(name: str) -> str:
 
 def test_strategy_reader_accepts_utf16_and_reports_encoding():
     validation = read("lib__StrategyLab__LabStrategyValidation.ahk")
-    assert "LabStrategyReadText" in validation
+    assert "LabStrategyReadFile" in validation
+    assert 'FileRead(path, "RAW")' in validation
     assert 'FileRead(path, "UTF-16")' in validation
+    assert 'FileRead(path, "UTF-16-RAW")' in validation
     assert 'encoding := "UTF-16"' in validation
     assert "embedded NUL bytes" in validation
 
 
 def test_editor_preserves_detected_strategy_encoding():
     core = read("lib__StrategyLab__StrategyEditorCore.ahk")
-    assert "LabStrategyReadText(path, &this.Encoding)" in core
+    assert "loaded := LabStrategyReadFile(path)" in core
+    assert "this.Encoding := loaded.Encoding" in core
     assert "FileAppend(this.RenderText(), path, this.Encoding)" in core
     assert "FileAppend(this.RenderText(), temp, this.Encoding)" in core
 
 
-def test_webhook_title_opens_remote_settings():
-    preflight = read("submacros__lab_preflight.ps1")
-    assert "Install-WebhookRemoteShortcut" in preflight
-    assert 'Tab4_Title.OnEvent(\"Click\", LabRemoteLaunchSettings)' in preflight
-    assert "Discord Webhook title -> Strategy Lab Remote settings shortcut" in preflight
-
-
-def test_remote_settings_has_visible_failure_diagnostics():
+def test_remote_settings_remains_explicit_and_diagnostic():
+    gate = read("lib__StrategyLab__LabRemoteGate.ahk")
     remote = read("submacros__lab_remote_settings.ps1")
+    assert "Discord Remote" in gate
+    assert "LabRemoteLaunchSettings" in gate
     assert "remote-settings.log" in remote
     assert "Show-Fatal" in remote
     assert "FATAL remote settings startup" in remote
