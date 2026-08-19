@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - 'channel/stable/files/lib__StrategyLab__StrategyEditor*.ahk'
+      - 'channel/stable/files/lib__StrategyLab__LabEditorStability.ahk'
       - '.github/workflows/editor-dependency-contract.yml'
   pull_request:
     paths:
       - 'channel/stable/files/lib__StrategyLab__StrategyEditor*.ahk'
+      - 'channel/stable/files/lib__StrategyLab__LabEditorStability.ahk'
       - '.github/workflows/editor-dependency-contract.yml'
 
 permissions:
@@ -28,14 +30,30 @@ jobs:
           tab = (stable / 'lib__StrategyLab__StrategyEditorTab.ahk').read_text(encoding='utf-8-sig')
           ui = (stable / 'lib__StrategyLab__StrategyEditorUi.ahk').read_text(encoding='utf-8-sig')
           core = (stable / 'lib__StrategyLab__StrategyEditorCore.ahk').read_text(encoding='utf-8-sig')
+          interaction = (stable / 'lib__StrategyLab__StrategyEditorInteraction.ahk').read_text(encoding='utf-8-sig')
+          workspace = (stable / 'lib__StrategyLab__StrategyEditorWorkspace.ahk').read_text(encoding='utf-8-sig')
+          stability = (stable / 'lib__StrategyLab__LabEditorStability.ahk').read_text(encoding='utf-8-sig')
 
           core_include = 'StrategyEditorCore.ahk'
           ui_include = 'StrategyEditorUi.ahk'
+          stability_include = 'LabEditorStability.ahk'
+          interaction_include = 'StrategyEditorInteraction.ahk'
+          workspace_include = 'StrategyEditorWorkspace.ahk'
 
-          assert 'LabStratDocument(path)' in ui, 'UI no longer matches the dependency contract'
-          assert 'class LabStratDocument' in core, 'StrategyEditorCore must declare LabStratDocument'
-          assert core_include in tab, 'StrategyEditorTab must include StrategyEditorCore at runtime'
-          assert ui_include in tab, 'StrategyEditorTab must include StrategyEditorUi at runtime'
-          assert tab.index(core_include) < tab.index(ui_include), 'StrategyEditorCore must be included before StrategyEditorUi'
+          assert 'LabStratDocument(path)' in ui
+          assert 'class LabStratDocument' in core
+          assert core_include in tab and ui_include in tab
+          assert tab.index(core_include) < tab.index(ui_include)
 
-          print('Strategy Editor dependency order is self-contained and valid.')
+          assert stability_include in tab, 'lifecycle guard must be included at runtime'
+          assert interaction_include in tab and workspace_include in tab
+          assert tab.index(stability_include) < tab.index(interaction_include), 'stability helpers must exist before interaction timers start'
+          assert tab.index(stability_include) < tab.index(workspace_include), 'stability helpers must exist before workspace timer starts'
+
+          assert 'LabEditorControlAlive' in stability
+          assert 'LabEditorControlVisible' in stability
+          assert 'LabEditorLifecycleExit' in stability
+          assert 'LabEditorControlVisible(LabEditorCanvasBg)' in interaction
+          assert 'LabEditorControlVisible(LabEditorCanvasBg)' in workspace
+
+          print('Strategy Editor dependency and lifecycle order is self-contained and valid.')

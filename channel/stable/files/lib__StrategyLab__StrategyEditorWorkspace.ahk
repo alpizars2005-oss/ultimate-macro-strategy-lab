@@ -12,8 +12,6 @@ global LabEditorWorkspaceCanvasH := 348
 global LabEditorWorkspaceExpandedW := 960
 global LabEditorWorkspaceExpandedH := 430
 
-; Decorative/semantic labels are created lazily only for the Editor workspace so
-; the compact upstream tabs keep their original visual footprint.
 global LabEditorSelectedTitle := ""
 global LabEditorPlacementsTitle := ""
 global LabEditorPositionTitle := ""
@@ -24,10 +22,14 @@ SetTimer(StrategyEditorWorkspaceMonitor, 75)
 
 StrategyEditorWorkspaceMonitor(*) {
     global LabEditorWorkspaceActive, LabEditorWorkspaceLastExpanded, LabEditorExpanded
-    global LabEditorCanvasBg, LabEditorSnapshot
+    global LabEditorCanvasBg, LabEditorSnapshot, LabEditorShuttingDown
 
-    editorVisible := false
-    try editorVisible := LabEditorCanvasBg.Visible || LabEditorSnapshot.Visible
+    if LabEditorShuttingDown
+        return
+
+    ; Gui.Control objects can outlive their native HWND during updater/ExitApp teardown.
+    ; Never dereference .Visible directly from a timer.
+    editorVisible := LabEditorControlVisible(LabEditorCanvasBg) || LabEditorControlVisible(LabEditorSnapshot)
 
     if editorVisible {
         if !LabEditorWorkspaceActive {
@@ -47,7 +49,7 @@ StrategyEditorWorkspaceEnsureDecor() {
     global MainGui
     global LabEditorSelectedTitle, LabEditorPlacementsTitle, LabEditorPositionTitle, LabEditorSaveTitle, LabEditorPanelAccent
 
-    if IsObject(LabEditorSelectedTitle)
+    if LabEditorControlAlive(LabEditorSelectedTitle)
         return
 
     MainGui.SetFont("s7 w700 c6D7785", "Segoe UI")
@@ -61,14 +63,14 @@ StrategyEditorWorkspaceEnsureDecor() {
 StrategyEditorWorkspaceDecorVisible(show := true) {
     global LabEditorSelectedTitle, LabEditorPlacementsTitle, LabEditorPositionTitle, LabEditorSaveTitle, LabEditorPanelAccent
     for ctrl in [LabEditorSelectedTitle, LabEditorPlacementsTitle, LabEditorPositionTitle, LabEditorSaveTitle, LabEditorPanelAccent] {
-        if IsObject(ctrl)
-            ctrl.Visible := show
+        if LabEditorControlAlive(ctrl)
+            try ctrl.Visible := show
     }
 }
 
 StrategyEditorWorkspaceEnter() {
-    global MainGui, LabEditorWorkspaceActive, LabEditorWorkspaceGuiW, LabEditorWorkspaceGuiH
-    if LabEditorWorkspaceActive
+    global MainGui, LabEditorWorkspaceActive, LabEditorWorkspaceGuiW, LabEditorWorkspaceGuiH, LabEditorShuttingDown
+    if LabEditorShuttingDown || LabEditorWorkspaceActive
         return
 
     try MainGui.Move(, , LabEditorWorkspaceGuiW, LabEditorWorkspaceGuiH)
@@ -79,9 +81,9 @@ StrategyEditorWorkspaceEnter() {
 
 StrategyEditorWorkspaceLeave() {
     global MainGui, LabEditorWorkspaceActive, LabEditorWorkspaceLastExpanded
-    global LabEditorCompactGuiW, LabEditorCompactGuiH
+    global LabEditorCompactGuiW, LabEditorCompactGuiH, LabEditorShuttingDown
 
-    if !LabEditorWorkspaceActive
+    if LabEditorShuttingDown || !LabEditorWorkspaceActive
         return
 
     StrategyEditorWorkspaceDecorVisible(false)
@@ -91,7 +93,7 @@ StrategyEditorWorkspaceLeave() {
 }
 
 StrategyEditorWorkspaceApply(rerender := false) {
-    global LabEditorExpanded, LabEditorWorkspaceLastExpanded
+    global LabEditorExpanded, LabEditorWorkspaceLastExpanded, LabEditorShuttingDown
     global LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH
     global LabEditorWorkspaceCanvasW, LabEditorWorkspaceCanvasH
     global LabEditorWorkspaceExpandedW, LabEditorWorkspaceExpandedH
@@ -107,6 +109,8 @@ StrategyEditorWorkspaceApply(rerender := false) {
     global LabEditorApplyBtn, LabEditorSaveBtn, LabEditorOverwriteBtn, LabEditorDirty, LabEditorStatus
     global LabEditorSelectedTitle, LabEditorPlacementsTitle, LabEditorPositionTitle, LabEditorSaveTitle, LabEditorPanelAccent
 
+    if LabEditorShuttingDown
+        return
     StrategyEditorWorkspaceEnsureDecor()
 
     wantedW := LabEditorExpanded ? LabEditorWorkspaceExpandedW : LabEditorWorkspaceCanvasW
@@ -119,7 +123,6 @@ StrategyEditorWorkspaceApply(rerender := false) {
     LabEditorCanvasH := wantedH
     LabEditorWorkspaceLastExpanded := LabEditorExpanded
 
-    ; Stronger type hierarchy: title/status read as a workspace, not a debug panel.
     try LabEditorTitle.SetFont("s12 w700 c55B7FF", "Segoe UI")
     try LabEditorSubtitle.SetFont("s7 w500 c83909C", "Segoe UI")
     try LabEditorAssetBadge.SetFont("s8 w600 c86C9D8", "Segoe UI")
@@ -129,13 +132,11 @@ StrategyEditorWorkspaceApply(rerender := false) {
     try LabEditorDirty.SetFont("s8 w600 cAAB7C4", "Segoe UI")
     try LabEditorStatus.SetFont("s8 w400 c8794A0", "Segoe UI")
 
-    ; Header: use the whole width instead of leaving a dead right half.
     try LabEditorTitle.Move(20, 92, 340, 26)
     try LabEditorSubtitle.Move(20, 118, 550, 17)
     try LabEditorAssetBadge.Move(690, 100, 290, 20)
     try LabEditorHeaderLine.Move(20, 137, 960, 1)
 
-    ; Primary toolbar: workflow actions left, navigation/zoom grouped right.
     try LabEditorOpenBtn.Move(20, 145, 60, 28)
     try LabEditorCurrentBtn.Move(84, 145, 84, 28)
     try LabEditorSnapshotBtn.Move(172, 145, 80, 28)
@@ -151,7 +152,6 @@ StrategyEditorWorkspaceApply(rerender := false) {
     try LabEditorFitBtn.Move(852, 145, 52, 28)
     try LabEditorExpandBtn.Move(910, 145, 70, 28)
 
-    ; Secondary toolbar: filter, sync and placement-footprint overlays form one group.
     try LabEditorLayerLabel.Move(20, 181, 38, 18)
     try LabEditorLayerCtrl.Move(62, 177, 226, 24)
     try LabEditorSyncBtn.Move(298, 177, 104, 24)
@@ -161,7 +161,6 @@ StrategyEditorWorkspaceApply(rerender := false) {
     }
     try LabEditorMapLabel.Move(680, 181, 300, 18)
 
-    ; Main tactical canvas.
     try LabEditorCanvasBg.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
     try LabEditorSnapshot.Move(LabEditorCanvasX, LabEditorCanvasY, LabEditorCanvasW, LabEditorCanvasH)
     try LabEditorCanvasHint.Move(
@@ -171,7 +170,6 @@ StrategyEditorWorkspaceApply(rerender := false) {
         56
     )
 
-    ; Details card: full portrait preview, clear identity, then the placement table.
     try LabEditorInfoPanel.Move(682, 205, 298, 348)
     try LabEditorPanelAccent.Move(682, 205, 3, 348)
     try LabEditorSelectedTitle.Move(700, 212, 264, 18)
@@ -187,7 +185,6 @@ StrategyEditorWorkspaceApply(rerender := false) {
         LabEditorList.ModifyCol(4, 42)
     }
 
-    ; Bottom command strip mirrors the two-column layout above.
     try LabEditorPositionTitle.Move(20, 557, 180, 18)
     try LabEditorSaveTitle.Move(682, 557, 298, 18)
     try {

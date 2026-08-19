@@ -47,6 +47,7 @@ global LabEditorCanvasH := 238
 #Include "%A_ScriptDir%\lib\StrategyLab\LabSimpleFootprints.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorMaps.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorSave.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\LabEditorStability.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorInteraction.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorWorkspace.ahk"
 
