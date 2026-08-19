@@ -28,9 +28,9 @@ jobs:
 
           stable = Path('channel/stable/files')
           bad = []
-          # In AHK strings, backslash is not an escape character. DllCall expects a
-          # single separator such as "user32\\IsWindow". Two literal backslashes make
-          # AutoHotkey try to load a DLL named "user32\\" and fail at runtime.
+          # In AHK strings, backslash is not an escape character. DllCall expects one
+          # DLL/function separator. Two literal backslashes make AutoHotkey try to load
+          # an invalid DLL path and fail only when that branch executes at runtime.
           doubled = re.compile(r'DllCall\(\s*"[^"\r\n]*\\\\[^"\r\n]*"')
           for path in stable.glob('*.ahk'):
               text = path.read_text(encoding='utf-8-sig')
@@ -56,8 +56,33 @@ jobs:
           #Requires AutoHotkey v2.0
           ok := DllCall("user32\IsWindow", "Ptr", 0, "Int")
           visible := DllCall("user32\IsWindowVisible", "Ptr", 0, "Int")
+          FileAppend("PASS", "*")
           ExitApp(0)
           '@ | Set-Content -LiteralPath dllcall-smoke.ahk -Encoding UTF8
 
-          & $exe.FullName /ErrorStdOut=UTF-8 .\dllcall-smoke.ahk
-          if ($LASTEXITCODE -ne 0) { throw "Win32 DllCall smoke test failed with exit code $LASTEXITCODE" }
+          $psi = New-Object Diagnostics.ProcessStartInfo
+          $psi.FileName = $exe.FullName
+          $psi.Arguments = '/ErrorStdOut=UTF-8 "' + (Resolve-Path '.\dllcall-smoke.ahk').Path + '"'
+          $psi.WorkingDirectory = (Get-Location).Path
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+
+          $proc = New-Object Diagnostics.Process
+          $proc.StartInfo = $psi
+          if (!$proc.Start()) { throw 'Could not launch AutoHotkey DllCall smoke test.' }
+          $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+          $stderrTask = $proc.StandardError.ReadToEndAsync()
+          if (!$proc.WaitForExit(15000)) {
+            try { $proc.Kill() } catch {}
+            throw 'AutoHotkey DllCall smoke test timed out.'
+          }
+          $stdout = $stdoutTask.GetAwaiter().GetResult()
+          $stderr = $stderrTask.GetAwaiter().GetResult()
+          if ($stdout) { Write-Host $stdout }
+          if ($stderr) { Write-Host $stderr }
+          if ($proc.ExitCode -ne 0 -or (($stdout + $stderr) -match '(?im)^Error:')) {
+            throw "Win32 DllCall smoke test failed with exit code $($proc.ExitCode)."
+          }
+          if ($stdout -notmatch 'PASS') { throw 'Win32 DllCall smoke test did not reach the success marker.' }
