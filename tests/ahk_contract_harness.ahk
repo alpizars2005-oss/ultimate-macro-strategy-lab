@@ -2,15 +2,9 @@
 #SingleInstance Force
 #Warn All, Off
 
-; Validate-only harness: CI invokes this file with AutoHotkey v2 /Validate, so none of
-; the runtime statements below execute. Function declarations and every #Include are
-; still loaded and validated, including known upstream function arity. Warnings are
-; disabled because this intentionally incomplete harness does not define every upstream
-; runtime symbol; parser/arity failures remain fatal and are still reported.
-;
-; IMPORTANT: the Strategy Editor include order below mirrors StrategyEditorTab.ahk.
-; Do not independently "help" the harness by providing dependencies that the real
-; runtime does not include; that masked the missing StrategyEditorCore regression once.
+; Validate-only harness: CI invokes this file with AutoHotkey v2 /Validate. Function
+; declarations and every #Include are loaded/validated while runtime work stays inert.
+; The include order mirrors StrategyEditorTab.ahk exactly.
 ExitApp()
 
 StartStrategy(ctrl, *) {
@@ -40,7 +34,12 @@ Gdip_SaveBitmapToFile(*) => 0
 Gdip_DeleteGraphics(*) => 0
 Gdip_BrushCreateSolid(*) => 1
 Gdip_FillRectangle(*) => 0
+Gdip_FillEllipse(*) => 0
 Gdip_DeleteBrush(*) => 0
+Gdip_CreatePen(*) => 1
+Gdip_DrawEllipse(*) => 0
+Gdip_DeletePen(*) => 0
+Gdip_TextToGraphics(*) => 0
 Gdip_BitmapFromScreen(*) => 1
 
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__MapLibrary.ahk"
@@ -56,7 +55,6 @@ Gdip_BitmapFromScreen(*) => 1
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabStatsTab.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorUi.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorPlacements.ahk"
-#Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabSimpleFootprints.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorMaps.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__StrategyEditorSave.ahk"
 #Include "%A_ScriptDir%\..\channel\stable\files\lib__StrategyLab__LabEditorStability.ahk"

@@ -1,0 +1,90 @@
+name: Strategy Editor canvas runtime
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'channel/stable/files/lib__StrategyLab__StrategyEditor*.ahk'
+      - 'channel/stable/files/lib__StrategyLab__LabEditorStability.ahk'
+      - 'channel/stable/files/lib__StrategyLab__TowerCatalog.ahk'
+      - 'tests/editor_canvas_runtime_test.ahk'
+      - '.github/workflows/editor-canvas-runtime.yml'
+  pull_request:
+    paths:
+      - 'channel/stable/files/lib__StrategyLab__StrategyEditor*.ahk'
+      - 'channel/stable/files/lib__StrategyLab__LabEditorStability.ahk'
+      - 'channel/stable/files/lib__StrategyLab__TowerCatalog.ahk'
+      - 'tests/editor_canvas_runtime_test.ahk'
+      - '.github/workflows/editor-canvas-runtime.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  canvas-render-layer-hit-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned AutoHotkey v2 runtime
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.19/AutoHotkey_2.0.19.zip'
+          Invoke-WebRequest -Uri $url -OutFile ahk.zip
+          Expand-Archive -Path ahk.zip -DestinationPath ahk -Force
+          $exe = Get-ChildItem -Path ahk -Recurse -Filter AutoHotkey64.exe | Select-Object -First 1
+          if (!$exe) { throw 'AutoHotkey64.exe not found in release archive.' }
+          "AHK_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Stage install-style Strategy Lab tree
+        shell: pwsh
+        run: |
+          $stage = Join-Path (Get-Location).Path '_editor_canvas_stage'
+          $lib = Join-Path $stage 'lib\StrategyLab'
+          New-Item -ItemType Directory -Force -Path $lib | Out-Null
+
+          Get-ChildItem 'channel\stable\files' -Filter 'lib__StrategyLab__*.ahk' | ForEach-Object {
+            $name = $_.Name.Substring('lib__StrategyLab__'.Length)
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $lib $name) -Force
+          }
+
+          $towerDir = Join-Path $stage 'Resources\StrategyLab\Towers'
+          $rewardDir = Join-Path $stage 'Resources\StrategyLab\Rewards'
+          $mapDir = Join-Path $stage 'Resources\StrategyLab\Maps'
+          New-Item -ItemType Directory -Force -Path $towerDir,$rewardDir,$mapDir | Out-Null
+          Copy-Item 'channel\stable\files\Resources__StrategyLab__Towers__catalog.ini' (Join-Path $towerDir 'catalog.ini') -Force
+          Copy-Item 'channel\stable\files\Resources__StrategyLab__Rewards__catalog.ini' (Join-Path $rewardDir 'catalog.ini') -Force
+          Copy-Item 'channel\stable\files\Resources__StrategyLab__Maps__catalog.ini' (Join-Path $mapDir 'catalog.ini') -Force
+
+          Copy-Item 'tests\editor_canvas_runtime_test.ahk' (Join-Path $stage 'editor_canvas_runtime_test.ahk') -Force
+          "EDITOR_CANVAS_STAGE=$stage" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run single-canvas editor runtime contract
+        shell: pwsh
+        run: |
+          $script = Join-Path $env:EDITOR_CANVAS_STAGE 'editor_canvas_runtime_test.ahk'
+          $psi = New-Object Diagnostics.ProcessStartInfo
+          $psi.FileName = $env:AHK_EXE
+          $psi.Arguments = '/ErrorStdOut=UTF-8 "' + $script + '"'
+          $psi.WorkingDirectory = $env:EDITOR_CANVAS_STAGE
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+
+          $proc = New-Object Diagnostics.Process
+          $proc.StartInfo = $psi
+          if (!$proc.Start()) { throw 'Could not launch AutoHotkey canvas test.' }
+          $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+          $stderrTask = $proc.StandardError.ReadToEndAsync()
+          if (!$proc.WaitForExit(30000)) {
+            try { $proc.Kill() } catch {}
+            throw 'Editor canvas runtime test timed out after 30 seconds.'
+          }
+          $stdout = $stdoutTask.GetAwaiter().GetResult()
+          $stderr = $stderrTask.GetAwaiter().GetResult()
+          if ($stdout) { Write-Host $stdout }
+          if ($stderr) { Write-Host $stderr }
+          if ($proc.ExitCode -ne 0 -or (($stdout + $stderr) -match '(?im)^Error:|^FAIL:')) {
+            throw "Editor canvas runtime test failed with exit code $($proc.ExitCode)."
+          }
