@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Reject known AutoHotkey compatibility hazards
+      - name: Enforce Strategy Lab compatibility and canvas architecture
         shell: python
         run: |
           from pathlib import Path
@@ -42,15 +42,17 @@ jobs:
           updater = (stable / 'submacros__lab_update.ps1').read_text(encoding='utf-8-sig')
           validation = (stable / 'lib__StrategyLab__LabStrategyValidation.ahk').read_text(encoding='utf-8-sig')
           core = (stable / 'lib__StrategyLab__StrategyEditorCore.ahk').read_text(encoding='utf-8-sig')
-          remote = (stable / 'lib__StrategyLab__LabRemoteGate.ahk').read_text(encoding='utf-8-sig')
-          footprints = (stable / 'lib__StrategyLab__LabSimpleFootprints.ahk').read_text(encoding='utf-8-sig')
+          tab = (stable / 'lib__StrategyLab__StrategyEditorTab.ahk').read_text(encoding='utf-8-sig')
+          ui = (stable / 'lib__StrategyLab__StrategyEditorUi.ahk').read_text(encoding='utf-8-sig')
           placements = (stable / 'lib__StrategyLab__StrategyEditorPlacements.ahk').read_text(encoding='utf-8-sig')
+          maps = (stable / 'lib__StrategyLab__StrategyEditorMaps.ahk').read_text(encoding='utf-8-sig')
           interaction = (stable / 'lib__StrategyLab__StrategyEditorInteraction.ahk').read_text(encoding='utf-8-sig')
           workspace = (stable / 'lib__StrategyLab__StrategyEditorWorkspace.ahk').read_text(encoding='utf-8-sig')
           stability = (stable / 'lib__StrategyLab__LabEditorStability.ahk').read_text(encoding='utf-8-sig')
+          remote = (stable / 'lib__StrategyLab__LabRemoteGate.ahk').read_text(encoding='utf-8-sig')
+          stats = (stable / 'lib__StrategyLab__LabStatsTab.ahk').read_text(encoding='utf-8-sig')
           reward_catalog = (stable / 'lib__StrategyLab__LabRewardCatalog.ahk').read_text(encoding='utf-8-sig')
           reward_tracker = (stable / 'lib__StrategyLab__LabRewardTracker.ahk').read_text(encoding='utf-8-sig')
-          stats = (stable / 'lib__StrategyLab__LabStatsTab.ahk').read_text(encoding='utf-8-sig')
           rewards_ini = (stable / 'Resources__StrategyLab__Rewards__catalog.ini').read_text(encoding='utf-8-sig')
           remote_settings = (stable / 'submacros__lab_remote_settings.ps1').read_text(encoding='utf-8-sig')
           preflight = (stable / 'submacros__lab_preflight.ps1').read_text(encoding='utf-8-sig')
@@ -62,42 +64,46 @@ jobs:
           assert 'FileRead(path, "RAW")' in validation
           assert 'LabStrategyTrimTerminalNuls' in validation
 
-          assert 'global LabEditorMarkerCtrls, CurrentTab' not in placements
-          assert 'CurrentTab =' not in placements
-          assert 'StrategyEditorIsActive()' in placements
-          assert 'showPlacement := editorActive && point.visible' in placements
-          assert 'StrategyEditorResolveLayerSelection' in placements
-          assert 'LabEditorLayerCtrl.Text' in placements
+          # 0.4 architecture: no placement/ring HWNDs. One screenshot Picture owns all
+          # placement graphics; interaction is geometric.
+          assert 'LabSimpleFootprints.ahk' not in tab
+          assert 'MainGui.Add("Text"' not in placements
+          assert 'MainGui.Add("Picture"' not in placements
+          assert 'DestroyWindow' not in placements
+          assert 'LabEditorHitRegions' in placements
+          assert 'StrategyEditorHitTestPlacement' in placements
+          assert 'StrategyEditorBeginDrag' in placements
+          assert 'Gdip_FillEllipse' in maps and 'Gdip_DrawEllipse' in maps
+          assert 'StrategyEditorRenderCompositeFrame' in maps
+          assert 'LabEditorHitRegions.Push' in maps
+          assert 'StrategyEditorHitTestPlacement(mx, my)' in interaction
+          assert 'StrategyEditorSlotColor' in placements
+          assert 'return "Radii: All"' in placements
 
-          # 0.3.11 lifecycle contract: native HWND liveness is authoritative. No timer
-          # may use CanvasBg/Snapshot .Visible as its activity sentinel directly.
-          assert 'LabEditorControlAlive' in stability
-          assert 'user32\\IsWindow' in stability
+          # Editor map/tower visuals are local only: exact screenshot + generated badges.
+          assert 'LabMapCameraPath(mapName)' in maps
+          assert 'LabMapPreferredBackground' not in maps
+          assert 'LabTowerPortraitPath' not in maps
+          assert 'lab_assets.ps1' not in maps
+          assert 'submacros/lab_assets.ps1|' not in mapping
+          assert 'lib/StrategyLab/LabSimpleFootprints.ahk|' not in mapping
+          assert 'Map source: exact screenshot' in maps
+          assert 'StrategyEditorSetCircularRegion(LabEditorTowerPortrait, 62)' in ui
+
+          # Native lifecycle guards cover Editor and Stats teardown.
+          assert 'LabEditorControlAlive' in stability and 'user32\\IsWindow' in stability
           assert 'LabEditorLifecycleExit' in stability
-          assert 'SetTimer(StrategyEditorWorkspaceMonitor, 0)' in stability
           assert 'return LabEditorControlVisible(LabEditorCanvasBg) || LabEditorControlVisible(LabEditorSnapshot)' in interaction
           assert 'LabEditorControlVisible(LabEditorCanvasBg) || LabEditorControlVisible(LabEditorSnapshot)' in workspace
-          assert 'LabEditorCanvasBg.Visible || LabEditorSnapshot.Visible' not in workspace
+          assert 'LabStatsControlVisible(LabStatsState)' in stats
+          assert 'LabStatsControlAlive' in stats
+
           assert 'lib/StrategyLab/LabEditorStability.ahk|' in mapping
-
-          # Retire the sibling Picture footprint overlay until it is composited into
-          # the map frame. This removes the black/square transparency corruption path.
-          assert 'Resources/StrategyLab/Towers/footprint-guide.png|' not in mapping
-          assert 'FileDelete(legacy)' in stability
-          assert 'LabEditorRingMode := "off"' in stability
-
-          # Unique portrait helper remains one marker HWND replacing one marker HWND.
-          assert 'LabSimpleFootprintsUpgradeUniqueMarker' in footprints
-          assert 'DestroyWindow' in footprints
-          assert 'entry.ring.Value' not in footprints
-          assert 'LabEditorRingMode :=' not in footprints
-
           assert 'lib/StrategyLab/LabStatsTab.ahk|' in mapping
           assert 'lib/StrategyLab/LabRewardCatalog.ahk|' in mapping
           assert 'lib/StrategyLab/LabRewardTracker.ahk|' in mapping
           assert 'submacros/lab_reward_assets.ps1|' in mapping
           assert 'Resources/StrategyLab/Rewards/catalog.ini|' in mapping
-          assert 'LabStatsCreateTab' in stats and 'LabStatsShow' in stats
           assert 'SetTimer(LabRewardMaybeSyncAssets, -6000)' in reward_catalog
           assert 'special_drops":[]' in reward_tracker
           for required in ['[Coin]','[Gem]','[Experience]','[Spin Ticket]','[Revive Ticket]','[Time Scale Ticket]']:
@@ -112,7 +118,6 @@ jobs:
           assert '[switch]$SelfTest' in remote_settings
           assert '<StrategyLabRemoteBoundary>' in preflight
           assert 'LabRemoteConsumeBetweenMatches(&switched, &stratName)' in preflight
-          assert 'Remove-ObsoleteTitleRemoteShortcut' in preflight
           assert 'StrategyEditorCreateTab(MainGui)' in clean_installer
           assert 'LabStatsCreateTab(MainGui)' in clean_installer
           assert '"Editor", "Stats", "Credits"' in clean_installer
@@ -121,7 +126,6 @@ jobs:
         shell: pwsh
         run: |
           $files = @(
-            'channel/stable/files/submacros__lab_assets_v3.ps1',
             'channel/stable/files/submacros__lab_reward_assets.ps1',
             'channel/stable/files/submacros__lab_update.ps1',
             'channel/stable/files/submacros__lab_preflight.ps1',
