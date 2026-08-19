@@ -1,4 +1,4 @@
-# Strategy Lab stable delivery map 0.4.3 exact footprints + in-memory canvas
+# Strategy Lab stable delivery map 0.4.4 editor runtime isolation
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 run_lab.bat|channel/stable/files/run_lab.bat|raw
@@ -15,6 +15,7 @@ lib/StrategyLab/StrategyEditorSave.ahk|channel/stable/files/lib__StrategyLab__St
 lib/StrategyLab/LabEditorStability.ahk|channel/stable/files/lib__StrategyLab__LabEditorStability.ahk|raw
 lib/StrategyLab/StrategyEditorInteraction.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorInteraction.ahk|raw
 lib/StrategyLab/StrategyEditorWorkspace.ahk|channel/stable/files/lib__StrategyLab__StrategyEditorWorkspace.ahk|raw
+lib/StrategyLab/LabEditorHotfix044.ahk|channel/stable/files/lib__StrategyLab__LabEditorHotfix044.ahk|raw
 lib/StrategyLab/StrategyCalibration.ahk|channel/stable/files/lib__StrategyLab__StrategyCalibration.ahk|raw
 lib/StrategyLab/MapLibrary.ahk|channel/stable/files/lib__StrategyLab__MapLibrary.ahk|raw
 lib/StrategyLab/LabAutoMapCapture.ahk|channel/stable/files/lib__StrategyLab__LabAutoMapCapture.ahk|raw
