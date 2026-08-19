@@ -45,6 +45,64 @@ function Repair-StrayClear([string]$Text,[string]$Main,[ref]$Changed) {
     return $Text
 }
 
+function Install-MainGuiSubmitGuard([string]$Text,[string]$Main,[ref]$Changed) {
+    if ($Text.Contains('; <StrategyLabMainGuiGuard>')) {
+        Log 'OK MainGui submit guard already installed.'
+        return $Text
+    }
+
+    $pattern = '(?m)^(?<indent>[ \t]*)if !IsSet\(MainGui\) or !MainGui[ \t]*\r?\n[ \t]+return[ \t]*\r?\n[ \t]*\r?\n[ \t]*v := MainGui\.Submit\(false\)[ \t]*$'
+    $matches = [regex]::Matches($Text,$pattern)
+    if ($matches.Count -ne 1) {
+        throw "MainGui submit guard anchor is ambiguous (found $($matches.Count))."
+    }
+
+    $m = $matches[0]
+    $indent = $m.Groups['indent'].Value
+    $block = $indent + 'if !IsSet(MainGui) || !IsObject(MainGui)' + "`r`n" +
+        $indent + '    return' + "`r`n" +
+        $indent + '; <StrategyLabMainGuiGuard>' + "`r`n" +
+        $indent + 'labMainHwnd := 0' + "`r`n" +
+        $indent + 'try labMainHwnd := MainGui.Hwnd' + "`r`n" +
+        $indent + 'if !labMainHwnd || !DllCall("user32\IsWindow", "Ptr", labMainHwnd, "Int")' + "`r`n" +
+        $indent + '    return' + "`r`n" +
+        $indent + '; </StrategyLabMainGuiGuard>' + "`r`n" +
+        $indent + 'v := MainGui.Submit(false)'
+
+    Backup-Main $Main 'MainGui submit lifecycle guard' | Out-Null
+    $Text = $Text.Substring(0,$m.Index) + $block + $Text.Substring($m.Index + $m.Length)
+    $Changed.Value = $true
+    Log 'INSTALLED MainGui HWND guard before StartStrategy Submit(false).'
+    return $Text
+}
+
+function Install-AutoMapCaptureBoundary([string]$Text,[string]$Main,[ref]$Changed) {
+    if ($Text.Contains('; <StrategyLabAutoMapCapture>')) {
+        Log 'OK automatic map-capture boundary already installed.'
+        return $Text
+    }
+
+    $pattern = '(?m)^(?<indent>[ \t]*)CheckTheMapF\(\)[ \t]*$'
+    $matches = [regex]::Matches($Text,$pattern)
+    if ($matches.Count -ne 1) {
+        throw "automatic map-capture anchor is ambiguous (found $($matches.Count) CheckTheMapF calls)."
+    }
+
+    $m = $matches[0]
+    $indent = $m.Groups['indent'].Value
+    $block = $m.Value.TrimEnd("`r","`n") + "`r`n" +
+        $indent + '; <StrategyLabAutoMapCapture>' + "`r`n" +
+        $indent + '; One-shot exact editor screenshot after normal/special-map camera alignment.' + "`r`n" +
+        $indent + 'try LabMapAutoCaptureIfMissing(gamemap)' + "`r`n" +
+        $indent + '; </StrategyLabAutoMapCapture>'
+
+    Backup-Main $Main 'automatic map screenshot boundary' | Out-Null
+    $Text = $Text.Substring(0,$m.Index) + $block + $Text.Substring($m.Index + $m.Length)
+    $Changed.Value = $true
+    Log 'INSTALLED one-shot automatic map screenshot boundary after CheckTheMapF().'
+    return $Text
+}
+
 function Install-RemoteBoundary([string]$Text,[string]$Main,[ref]$Changed) {
     $original = $Text
     $marked = '(?ms)^[ \t]*; <StrategyLabRemoteBoundary>[ \t]*\r?\n.*?^[ \t]*; </StrategyLabRemoteBoundary>[ \t]*\r?\n?'
@@ -89,8 +147,6 @@ function Install-RemoteBoundary([string]$Text,[string]$Main,[ref]$Changed) {
 }
 
 function Remove-ObsoleteTitleRemoteShortcut([string]$Text,[string]$Main,[ref]$Changed) {
-    # 0.3.7+ has a real Discord Remote Button. Binding the existing Webhook Text title
-    # to a second callback can open DiscordSettings and Lab Remote simultaneously.
     $pattern = '(?m)^[ \t]*Tab4_Title\.OnEvent\("Click",[ \t]*LabRemoteLaunchSettings\)[ \t]*\r?\n?'
     $matches = [regex]::Matches($Text,$pattern)
     if ($matches.Count -gt 0) {
@@ -106,7 +162,11 @@ function Verify-LabModules([string]$InstallRoot) {
     $required = @(
         'lib\StrategyLab\StrategyEditorTab.ahk',
         'lib\StrategyLab\StrategyEditorPlacements.ahk',
-        'lib\StrategyLab\LabSimpleFootprints.ahk',
+        'lib\StrategyLab\StrategyEditorMaps.ahk',
+        'lib\StrategyLab\StrategyEditorInteraction.ahk',
+        'lib\StrategyLab\MapLibrary.ahk',
+        'lib\StrategyLab\LabAutoMapCapture.ahk',
+        'lib\StrategyLab\LabEditorStability.ahk',
         'lib\StrategyLab\LabStatsTab.ahk',
         'lib\StrategyLab\LabSafety.ahk',
         'lib\StrategyLab\LabStrategyValidation.ahk',
@@ -123,7 +183,7 @@ function Verify-LabModules([string]$InstallRoot) {
         if (!(Test-Path -LiteralPath (Join-Path $InstallRoot $relative) -PathType Leaf)) { $missing += $relative }
     }
     if ($missing.Count -gt 0) { throw ('Required Strategy Lab modules are missing: ' + ($missing -join ', ')) }
-    Log 'OK Strategy Lab required module set present.'
+    Log 'OK Strategy Lab 0.4 required module set present.'
 }
 
 try {
@@ -147,6 +207,8 @@ try {
     $changed = $false
     $text = Repair-StrayClear $text $main ([ref]$changed)
     $text = Remove-ObsoleteTitleRemoteShortcut $text $main ([ref]$changed)
+    $text = Install-MainGuiSubmitGuard $text $main ([ref]$changed)
+    $text = Install-AutoMapCaptureBoundary $text $main ([ref]$changed)
 
     $remoteGate = Join-Path $installRoot 'lib\StrategyLab\LabRemoteGate.ahk'
     if (Test-Path -LiteralPath $remoteGate -PathType Leaf) {
