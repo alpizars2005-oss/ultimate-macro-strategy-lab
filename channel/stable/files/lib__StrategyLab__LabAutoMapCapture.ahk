@@ -2,11 +2,14 @@
 
 ; One-shot exact-map capture for the screenshot-only editor.
 ;
-; 0.4.2 captured after CheckTheMapF(), which can still be the map-vote/lobby screen.
-; 0.4.3 is called at the very beginning of SpawnTower(): at that point the match and
-; fixed macro camera are definitely live, but no tower has been placed yet.
+; 0.4.4 rule: SpawnTower must never perform screenshot, GUI, file or GDI+ work inline.
+; The preflight compatibility hook may still call LabMapAutoCaptureCurrent(), but that
+; function only schedules a deferred attempt and returns immediately. Gameplay clicks
+; therefore retain their original ordering/timing.
 
 global LabAutoMapCaptureBusy := false
+global LabAutoMapCaptureScheduled := false
+global LabAutoMapCaptureRetry := 0
 
 LabAutoMapCaptureLog(message) {
     try {
@@ -18,23 +21,78 @@ LabAutoMapCaptureLog(message) {
     }
 }
 
+LabAutoMapStrategyRunning() {
+    global RunningStrategy
+    if !IsSet(RunningStrategy)
+        return false
+    try return !!RunningStrategy
+    catch
+        return false
+}
+
+; Compatibility entry point injected by 0.4.3 preflight at SpawnTower entry. In 0.4.4
+; it is intentionally constant-time: no disk lookup, no image decode, no WinActivate,
+; no Hide/Show, no getRobloxPos and no GDI+.
 LabMapAutoCaptureCurrent(*) {
-    global gamemap
+    global gamemap, LabAutoMapCaptureScheduled, LabAutoMapCaptureRetry
+
     if !IsSet(gamemap)
         return ""
-    return LabMapAutoCaptureIfMissing(gamemap)
+    if (Trim(String(gamemap)) = "")
+        return ""
+    if LabAutoMapCaptureScheduled
+        return ""
+
+    LabAutoMapCaptureScheduled := true
+    LabAutoMapCaptureRetry := 0
+    ; Give the original SpawnTower thread ample time to execute its real slot/placement
+    ; clicks first. The fixed macro camera does not change after that first placement.
+    SetTimer(LabMapAutoCaptureDeferred, -2200)
+    return ""
+}
+
+LabMapAutoCaptureDeferred(*) {
+    global gamemap, LabAutoMapCaptureScheduled, LabAutoMapCaptureRetry
+
+    LabAutoMapCaptureScheduled := false
+    if !LabAutoMapStrategyRunning()
+        return ""
+    if !IsSet(gamemap)
+        return ""
+
+    name := Trim(String(gamemap))
+    if (name = "")
+        return ""
+
+    cached := LabMapCameraPath(name)
+    if (cached != "" && !LabMapCameraNeedsRefresh(name))
+        return cached
+
+    ; Never alter foreground focus to obtain an editor picture. If Roblox is not the
+    ; active window, retry later instead of touching MainGui/WinActivate and risking the
+    ; macro's absolute Click commands.
+    if !WinActive("ahk_exe RobloxPlayerBeta.exe") {
+        if (LabAutoMapCaptureRetry < 8) {
+            LabAutoMapCaptureRetry += 1
+            LabAutoMapCaptureScheduled := true
+            SetTimer(LabMapAutoCaptureDeferred, -750)
+        } else {
+            LabAutoMapCaptureLog("Deferred capture gave up waiting for Roblox foreground: " name)
+        }
+        return ""
+    }
+
+    return LabMapAutoCaptureIfMissing(name)
 }
 
 LabMapAutoCaptureIfMissing(mapName) {
-    global LabAutoMapCaptureBusy, MainGui
+    global LabAutoMapCaptureBusy
     global LabEditorCurrentMap, LabEditorSourceImage, LabEditorBackgroundMode
 
     name := Trim(String(mapName))
     if (name = "")
         return ""
 
-    ; A 0.4.3 capture has stage metadata. Old 0.4.2 files deliberately have none and
-    ; are refreshed once because they may contain the map-vote/lobby screen.
     cached := LabMapCameraPath(name)
     if (cached != "" && !LabMapCameraNeedsRefresh(name))
         return cached
@@ -43,57 +101,44 @@ LabMapAutoCaptureIfMissing(mapName) {
         return ""
     if !WinExist("ahk_exe RobloxPlayerBeta.exe")
         return ""
+    if !WinActive("ahk_exe RobloxPlayerBeta.exe") {
+        LabAutoMapCaptureLog("Skipped capture because Roblox was not foreground: " name)
+        return ""
+    }
 
     LabAutoMapCaptureBusy := true
     pBitmap := 0
-    restoreMainGui := false
     try {
-        ; The macro normally hides MainGui while running, but make the capture robust
-        ; when a developer/test starts SpawnTower with the editor still visible.
-        if IsSet(MainGui) && IsObject(MainGui) {
-            mainHwnd := 0
-            try mainHwnd := MainGui.Hwnd
-            if (mainHwnd && DllCall("user32\IsWindow", "Ptr", mainHwnd, "Int")
-                && DllCall("user32\IsWindowVisible", "Ptr", mainHwnd, "Int")) {
-                try MainGui.Hide()
-                restoreMainGui := true
-                Sleep(50)
-            }
-        }
-
         getRobloxPos(&x, &y, &w, &h)
         if (w < 100 || h < 100)
             throw Error("Roblox client area is not usable.")
 
-        ; SpawnTower has only just begun, so the view is the same fixed macro camera
-        ; used by the recorded coordinates and still contains no newly placed tower.
+        ; No GUI/focus operations occur here. Gameplay has already had >2 seconds to
+        ; complete the first SpawnTower click sequence, while the authoritative fixed
+        ; macro camera remains unchanged.
         pBitmap := Gdip_BitmapFromScreen(x "|" y "|" w "|" h)
         if !pBitmap
             throw Error("GDI+ could not capture Roblox.")
 
+        ; Keep the historical stage token "spawn" for cache migration/contract
+        ; compatibility; the actual capture work is deferred well after SpawnTower entry.
         saved := LabMapSaveCameraBitmap(name, pBitmap, "spawn")
         if (saved = "")
             throw Error("MapLibrary rejected the captured screenshot.")
 
-        ; If the editor has this map open, point it at the refreshed file now. Do not
-        ; force a render during gameplay; the next editor repaint will pick it up.
         if IsSet(LabEditorCurrentMap) && LabEditorCurrentMap = name {
             LabEditorSourceImage := saved
             LabEditorBackgroundMode := "camera"
         }
 
-        LabAutoMapCaptureLog("Captured exact SpawnTower camera: " name " -> " saved)
+        LabAutoMapCaptureLog("Captured deferred fixed-camera map: " name " -> " saved)
         return saved
     } catch Error as err {
-        ; Editor imagery must never stop a strategy. If capture fails we keep gameplay
-        ; running and retry on a later SpawnTower/run because no valid stage was saved.
         LabAutoMapCaptureLog("Capture failed for " name ": " err.Message)
         return ""
     } finally {
         if pBitmap
             try Gdip_DisposeImage(pBitmap)
-        if restoreMainGui && IsSet(MainGui) && IsObject(MainGui)
-            try MainGui.Show("NA")
         LabAutoMapCaptureBusy := false
     }
 }
