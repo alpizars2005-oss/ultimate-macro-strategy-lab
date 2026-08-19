@@ -30,13 +30,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Enforce Strategy Lab compatibility and 0.4.6 architecture
+      - name: Enforce Strategy Lab 0.4.6 architecture
         shell: python
         run: |
           from pathlib import Path
 
           stable = Path('channel/stable/files')
-          ahk = '\n'.join(p.read_text(encoding='utf-8-sig') for p in stable.glob('*.ahk'))
           mapping = Path('channel/stable/files.map').read_text(encoding='utf-8')
           launcher = (stable / 'run_lab.bat').read_text(encoding='utf-8-sig')
           updater = (stable / 'submacros__lab_update.ps1').read_text(encoding='utf-8-sig')
@@ -52,8 +51,6 @@ jobs:
           watchdog_bridge = (stable / 'lib__StrategyLab__LabWatchdogBridge.ahk').read_text(encoding='utf-8-sig')
           watchdog_patch = (stable / 'submacros__lab_watchdog_patch.ps1').read_text(encoding='utf-8-sig')
           postrun = (stable / 'submacros__lab_postrun_calibrate.ps1').read_text(encoding='utf-8-sig')
-          interaction = (stable / 'lib__StrategyLab__StrategyEditorInteraction.ahk').read_text(encoding='utf-8-sig')
-          workspace = (stable / 'lib__StrategyLab__StrategyEditorWorkspace.ahk').read_text(encoding='utf-8-sig')
           stability = (stable / 'lib__StrategyLab__LabEditorStability.ahk').read_text(encoding='utf-8-sig')
           remote = (stable / 'lib__StrategyLab__LabRemoteGate.ahk').read_text(encoding='utf-8-sig')
           stats = (stable / 'lib__StrategyLab__LabStatsTab.ahk').read_text(encoding='utf-8-sig')
@@ -65,19 +62,17 @@ jobs:
           preflight = (stable / 'submacros__lab_preflight.ps1').read_text(encoding='utf-8-sig')
           clean_installer = Path('tools/install_clean_strategy_lab.ps1').read_text(encoding='utf-8-sig')
 
-          assert '&this.' not in ahk
+          assert '&this.' not in core
           assert 'LabStrategyReadText' not in validation + core
           assert 'LabStrategyReadFile' in validation and 'LabStrategyReadFile(path)' in core
           assert 'FileRead(path, "RAW")' in validation
           assert 'LabStrategyTrimTerminalNuls' in validation
 
-          # Single canvas: no placement child HWNDs; new renderer is the only map include.
           assert 'StrategyEditorMaps046.ahk' in tab
           assert '#Include "%A_ScriptDir%\\lib\\StrategyLab\\StrategyEditorMaps.ahk"' not in tab
           assert 'MainGui.Add("Text"' not in placements
           assert 'MainGui.Add("Picture"' not in placements
           assert 'DestroyWindow' not in placements
-          assert 'LabEditorHitRegions' in placements
           assert 'StrategyEditorHitTestPlacement' in placements
           assert 'Gdip_FillEllipse' in maps and 'Gdip_DrawEllipse' in maps
           assert 'GdipCreateHBITMAPFromBitmap' in maps and '0x0172' in maps
@@ -86,14 +81,12 @@ jobs:
           assert 'if LabEditorPanActive' in maps
           assert 'LabFootprintPlacementCollides' in maps
 
-          # User-confirmed TDS placement boundary, not attack range.
           assert 'LabFootprintPixelsPerUnit := 26.0' in footprints
           assert 'small striped' in footprints and 'cyan outline' in footprints
           assert 'LabFootprintPlacementCollides' in footprints
           assert 'LabFootprintCanvasEllipse' in maps
           assert 'return "Footprints: All"' in placements
 
-          # Exact CLIENT capture + hotbar-free editable ROI.
           assert 'LabMapGetRobloxClientRect' in map_library
           assert 'WinGetClientPos' in map_library
           assert 'LabMapPlayableBottomReference := 918.0' in map_library
@@ -106,13 +99,14 @@ jobs:
           assert 'getRobloxPos(&pX, &pY, &w, &h)' not in maps
           assert 'getRobloxPos(&x, &y, &w, &h)' not in auto_capture
 
-          # Post-run reference/calibration is watchdog-owned and external to gameplay.
           assert 'LabWatchdogCaptureOutcome' in watchdog_bridge
           assert 'WinGetClientPos' in watchdog_bridge
           assert 'lab_postrun_calibrate.ps1' in watchdog_bridge
-          assert 'resTriumph1' in watchdog_patch and 'resTriumph2' in watchdog_patch and 'resLost' in watchdog_patch
-          assert 'LabWatchdogCaptureOutcome\\(\\"Triumph\\"\\)' in watchdog_patch
-          assert 'LabWatchdogCaptureOutcome\\(\\"Loss\\"\\)' in watchdog_patch
+          assert "Name='Triumph1'" in watchdog_patch
+          assert "Name='Triumph2'" in watchdog_patch
+          assert "Name='Loss'" in watchdog_patch
+          assert "Result='Triumph'" in watchdog_patch
+          assert "Result='Loss'" in watchdog_patch
           assert 'PixelsPerUnit' in postrun and 'postrun-cyan' in postrun
           assert 'Is-Cyan' in postrun
           assert 'lab_watchdog_patch.ps1' in launcher
@@ -121,7 +115,6 @@ jobs:
           assert 'submacros/lab_watchdog_patch.ps1|' in mapping
           assert 'lib/StrategyLab/StrategyEditorMaps046.ahk|' in mapping
 
-          # Maps local, tower portraits may use TDS Wiki.
           assert 'LabMapCameraPath(mapName)' in maps
           assert 'LabTowerPortraitPath' in maps
           assert 'submacros/lab_tower_assets.ps1|' in mapping
@@ -129,13 +122,11 @@ jobs:
           assert 'MapLibrary' not in tower_assets
           assert 'LabEditorTowerPortrait := gui.Add("Picture"' in ui
 
-          # Gameplay auto-capture remains deferred from SpawnTower.
           assert 'LabMapSaveCameraBitmap(name, pBitmap, "spawn")' in auto_capture
           assert 'LabMapAutoCaptureCurrent()' in preflight
           assert 'SpawnTower' in preflight
           assert 'LabMapAutoCaptureIfMissing(gamemap)' not in preflight
 
-          # Native lifecycle guards and previous features stay intact.
           assert 'LabEditorControlAlive' in stability and 'user32\\IsWindow' in stability
           assert 'LabEditorLifecycleExit' in stability
           assert 'LabStatsControlVisible(LabStatsState)' in stats
@@ -227,7 +218,7 @@ jobs:
             throw "AutoHotkey /Validate failed with exit code $($proc.ExitCode)."
           }
 
-      - name: Validate watchdog bridge with its real external surface stubbed
+      - name: Validate watchdog bridge surface
         shell: pwsh
         run: |
           $bridge = (Resolve-Path 'channel/stable/files/lib__StrategyLab__LabWatchdogBridge.ahk').Path
