@@ -2,10 +2,10 @@
 
 ; One-shot exact-map capture for the screenshot-only editor.
 ;
-; 0.4.4 rule: SpawnTower must never perform screenshot, GUI, file or GDI+ work inline.
-; The preflight compatibility hook may still call LabMapAutoCaptureCurrent(), but that
-; function only schedules a deferred attempt and returns immediately. Gameplay clicks
-; therefore retain their original ordering/timing.
+; SpawnTower never performs capture/focus/GDI/file work inline. The compatibility hook
+; schedules this worker and immediately returns to the original macro. 0.4.6 fixes the
+; important coordinate bug: GetClientRect gives size but NOT screen x/y, so screenshots
+; now use WinGetClientPos through LabMapGetRobloxClientRect().
 
 global LabAutoMapCaptureBusy := false
 global LabAutoMapCaptureScheduled := false
@@ -30,9 +30,6 @@ LabAutoMapStrategyRunning() {
         return false
 }
 
-; Compatibility entry point injected by 0.4.3 preflight at SpawnTower entry. In 0.4.4
-; it is intentionally constant-time: no disk lookup, no image decode, no WinActivate,
-; no Hide/Show, no getRobloxPos and no GDI+.
 LabMapAutoCaptureCurrent(*) {
     global gamemap, LabAutoMapCaptureScheduled, LabAutoMapCaptureRetry
 
@@ -45,8 +42,6 @@ LabMapAutoCaptureCurrent(*) {
 
     LabAutoMapCaptureScheduled := true
     LabAutoMapCaptureRetry := 0
-    ; Give the original SpawnTower thread ample time to execute its real slot/placement
-    ; clicks first. The fixed macro camera does not change after that first placement.
     SetTimer(LabMapAutoCaptureDeferred, -2200)
     return ""
 }
@@ -55,9 +50,7 @@ LabMapAutoCaptureDeferred(*) {
     global gamemap, LabAutoMapCaptureScheduled, LabAutoMapCaptureRetry
 
     LabAutoMapCaptureScheduled := false
-    if !LabAutoMapStrategyRunning()
-        return ""
-    if !IsSet(gamemap)
+    if !LabAutoMapStrategyRunning() || !IsSet(gamemap)
         return ""
 
     name := Trim(String(gamemap))
@@ -68,9 +61,7 @@ LabMapAutoCaptureDeferred(*) {
     if (cached != "" && !LabMapCameraNeedsRefresh(name))
         return cached
 
-    ; Never alter foreground focus to obtain an editor picture. If Roblox is not the
-    ; active window, retry later instead of touching MainGui/WinActivate and risking the
-    ; macro's absolute Click commands.
+    ; Never steal foreground focus for an editor screenshot.
     if !WinActive("ahk_exe RobloxPlayerBeta.exe") {
         if (LabAutoMapCaptureRetry < 8) {
             LabAutoMapCaptureRetry += 1
@@ -109,19 +100,13 @@ LabMapAutoCaptureIfMissing(mapName) {
     LabAutoMapCaptureBusy := true
     pBitmap := 0
     try {
-        getRobloxPos(&x, &y, &w, &h)
-        if (w < 100 || h < 100)
-            throw Error("Roblox client area is not usable.")
+        if !LabMapGetRobloxClientRect(&x, &y, &w, &h)
+            throw Error("Roblox client screen rectangle is not usable.")
 
-        ; No GUI/focus operations occur here. Gameplay has already had >2 seconds to
-        ; complete the first SpawnTower click sequence, while the authoritative fixed
-        ; macro camera remains unchanged.
         pBitmap := Gdip_BitmapFromScreen(x "|" y "|" w "|" h)
         if !pBitmap
-            throw Error("GDI+ could not capture Roblox.")
+            throw Error("GDI+ could not capture the Roblox client.")
 
-        ; Keep the historical stage token "spawn" for cache migration/contract
-        ; compatibility; the actual capture work is deferred well after SpawnTower entry.
         saved := LabMapSaveCameraBitmap(name, pBitmap, "spawn")
         if (saved = "")
             throw Error("MapLibrary rejected the captured screenshot.")
@@ -131,7 +116,7 @@ LabMapAutoCaptureIfMissing(mapName) {
             LabEditorBackgroundMode := "camera"
         }
 
-        LabAutoMapCaptureLog("Captured deferred fixed-camera map: " name " -> " saved)
+        LabAutoMapCaptureLog("Captured client-aligned fixed-camera map: " name " [" x "," y " " w "x" h "] -> " saved)
         return saved
     } catch Error as err {
         LabAutoMapCaptureLog("Capture failed for " name ": " err.Message)
