@@ -1,17 +1,31 @@
 #Requires AutoHotkey v2.0
 
-; Strategy Lab 0.4.7 layer + interaction performance hotfix.
+; Strategy Lab 0.4.7b interaction hotfix.
 ;
-; This file stays deliberately small: it reuses the 0.4.6 single-canvas renderer and
-; its cached drag base, but fixes Layer event ownership and raises interaction cadence
-; now that the expensive static canvas is already cached.
+; Goals:
+;   - Layer selection is captured from the native ComboBox notification, not a polling timer.
+;   - Drag uses a cached terrain + stationary-square bitmap and paints one moving square.
+;   - Pan keeps all visible tower squares on screen, but skips marker text while moving.
+;   - Lightweight in-memory profiling reports render ms/FPS only when interaction ends.
+; No gameplay clicks, strategy coordinates, saves, or footprint rules are changed.
 
 global Lab047LayerIndex := Map()
 global Lab047LayerIndexToken := ""
-global Lab047LayerHookHwnd := 0
 global Lab047DragLastPaint := 0
 global Lab047DragLastFieldUpdate := 0
 global Lab047PanLastPaint := 0
+
+global Lab047FastDragBitmap := 0
+global Lab047FastDragKey := ""
+global Lab047FastBrushes := Map()
+global Lab047FastBorderBrush := 0
+global Lab047FastSelectedBorderBrush := 0
+
+global Lab047ProfileKind := ""
+global Lab047ProfileFrames := 0
+global Lab047ProfileTotalMs := 0
+global Lab047ProfilePeakMs := 0
+global Lab047ProfileStarted := 0
 
 Lab047DocumentToken() {
     global LabEditorDoc
@@ -93,19 +107,20 @@ Lab047RefreshLayerList(indices, selectedDocIndex := 0) {
     return selectedVisibleRow
 }
 
-Lab047LayerChanged(ctrl, info) {
+Lab047ApplyLayerChoice(choice) {
     global LabEditorLayer, LabEditorLayerOptions, LabEditorLayerChangeBusy
     global LabEditorDoc, LabEditorSelectedRow, LabEditorXCtrl, LabEditorYCtrl
 
     if LabEditorLayerChangeBusy || !IsObject(LabEditorDoc)
         return
-
-    choice := 0
-    try choice := Integer(ctrl.Value)
     if (choice < 1 || choice > LabEditorLayerOptions.Length)
         return
 
-    LabEditorLayer := LabEditorLayerOptions[choice]
+    wanted := LabEditorLayerOptions[choice]
+    if (wanted = "")
+        return
+
+    LabEditorLayer := wanted
     Lab047EnsureLayerIndex(true)
     indices := Lab047VisibleIndices()
 
@@ -123,39 +138,279 @@ Lab047LayerChanged(ctrl, info) {
         StrategyEditorShowTower(placement)
     }
 
-    ; Layer is part of the renderer cache key, but release immediately so the next
-    ; interaction cannot display even one stale frame.
+    Lab047ReleaseFastDragBase()
     StrategyEditorReleaseFastBase()
     StrategyEditorRenderBackground()
     StrategyEditorSetStatus("Layer: " LabEditorLayer " • " indices.Length " placement"
         (indices.Length = 1 ? "" : "s") ".")
 }
 
-Lab047EnsureLayerHook(*) {
-    global LabEditorLayerCtrl, Lab047LayerHookHwnd
-    if !LabEditorControlAlive(LabEditorLayerCtrl)
+Lab047Command(wParam, lParam, msg, hwnd) {
+    global LabEditorLayerCtrl, LabEditorLayerOptions, LabEditorLayerChangeBusy
+    if LabEditorLayerChangeBusy || !LabEditorControlAlive(LabEditorLayerCtrl)
         return
 
-    hwnd := 0
-    try hwnd := LabEditorLayerCtrl.Hwnd
-    if !hwnd || Lab047LayerHookHwnd = hwnd
+    ctrlHwnd := 0
+    try ctrlHwnd := LabEditorLayerCtrl.Hwnd
+    if !ctrlHwnd || lParam != ctrlHwnd
         return
 
-    ; Remove the legacy callback and install one deterministic owner. This avoids the
-    ; old silent ListView-scope failure and keeps ListView row mapping tied to doc indices.
-    try LabEditorLayerCtrl.OnEvent("Change", StrategyEditorLayerChanged, 0)
-    LabEditorLayerCtrl.OnEvent("Change", Lab047LayerChanged, 1)
-    Lab047LayerHookHwnd := hwnd
-    Lab047EnsureLayerIndex(true)
+    ; WM_COMMAND / CBN_SELCHANGE. Read the native ComboBox selection directly so the
+    ; result cannot be lost through a stale AHK DropDownList Text/Value snapshot.
+    notify := (wParam >> 16) & 0xFFFF
+    if (notify != 1)
+        return
+
+    selectedZero := -1
+    try selectedZero := DllCall("user32\SendMessageW", "Ptr", ctrlHwnd, "UInt", 0x0147,
+        "Ptr", 0, "Ptr", 0, "Ptr")
+    choice := selectedZero + 1
+    if (choice < 1 || choice > LabEditorLayerOptions.Length)
+        return
+
+    ; Defer one turn of the message loop so the native control finishes committing the
+    ; selection before ListView/canvas work begins.
+    SetTimer(Lab047ApplyLayerChoice.Bind(choice), -1)
+}
+
+Lab047GetSlotBrush(slot) {
+    global Lab047FastBrushes
+    key := String(slot)
+    if Lab047FastBrushes.Has(key)
+        return Lab047FastBrushes[key]
+    brush := Gdip_BrushCreateSolid(StrategyEditorSlotColor(slot, 255))
+    if brush
+        Lab047FastBrushes[key] := brush
+    return brush
+}
+
+Lab047EnsureBorderBrushes() {
+    global Lab047FastBorderBrush, Lab047FastSelectedBorderBrush
+    if !Lab047FastBorderBrush
+        Lab047FastBorderBrush := Gdip_BrushCreateSolid(0xFF20252B)
+    if !Lab047FastSelectedBorderBrush
+        Lab047FastSelectedBorderBrush := Gdip_BrushCreateSolid(0xFFFFFFFF)
+}
+
+Lab047DrawFastMarker(graphics, placement, point, selected := false) {
+    global Lab047FastBorderBrush, Lab047FastSelectedBorderBrush
+    Lab047EnsureBorderBrushes()
+    fillBrush := Lab047GetSlotBrush(placement.slot)
+    borderBrush := selected ? Lab047FastSelectedBorderBrush : Lab047FastBorderBrush
+    markerSize := selected ? 22 : 18
+    half := markerSize / 2.0
+    border := selected ? 2 : 1
+
+    if borderBrush
+        Gdip_FillRectangle(graphics, borderBrush, point.x - half, point.y - half, markerSize, markerSize)
+    if fillBrush
+        Gdip_FillRectangle(graphics, fillBrush, point.x - half + border, point.y - half + border,
+            markerSize - (border * 2), markerSize - (border * 2))
+}
+
+Lab047SwapRenderedBitmap(pOut) {
+    if !pOut
+        return false
+    hBitmap := 0
+    try {
+        hBitmap := StrategyEditorBitmapToHBITMAP(pOut)
+    } finally {
+        try Gdip_DisposeImage(pOut)
+    }
+    if !hBitmap
+        return false
+    if StrategyEditorSwapCanvasBitmap(hBitmap)
+        return true
+    try DllCall("gdi32\DeleteObject", "Ptr", hBitmap)
+    return false
+}
+
+Lab047ReleaseFastDragBase(*) {
+    global Lab047FastDragBitmap, Lab047FastDragKey
+    if Lab047FastDragBitmap
+        try Gdip_DisposeImage(Lab047FastDragBitmap)
+    Lab047FastDragBitmap := 0
+    Lab047FastDragKey := ""
+}
+
+Lab047BuildFastDragBase(dragIndex) {
+    global Lab047FastDragBitmap, Lab047FastDragKey
+    global LabEditorSourceImage, LabEditorCanvasW, LabEditorCanvasH
+
+    if (LabEditorSourceImage = "" || !FileExist(LabEditorSourceImage))
+        return 0
+
+    key := "047|" StrategyEditorFastBaseCacheKey(dragIndex)
+    if (Lab047FastDragBitmap && Lab047FastDragKey = key)
+        return Lab047FastDragBitmap
+
+    Lab047ReleaseFastDragBase()
+    pSource := LabMapAcquireRenderBitmap(LabEditorSourceImage, &sourceW, &sourceH)
+    if !pSource || sourceW <= 0 || sourceH <= 0
+        return 0
+
+    pBase := Gdip_CreateBitmap(LabEditorCanvasW, LabEditorCanvasH)
+    if !pBase
+        return 0
+    g := Gdip_GraphicsFromImage(pBase)
+    if !g {
+        try Gdip_DisposeImage(pBase)
+        return 0
+    }
+
+    success := false
+    try {
+        StrategyEditorDrawSource(g, pSource, sourceW, sourceH, true)
+        for item in StrategyEditorCanvasPlacements() {
+            if (item.index = dragIndex)
+                continue
+            Lab047DrawFastMarker(g, item.placement, item.point, false)
+        }
+        success := true
+    } finally {
+        try Gdip_DeleteGraphics(g)
+        if !success
+            try Gdip_DisposeImage(pBase)
+    }
+    if !success
+        return 0
+
+    Lab047FastDragBitmap := pBase
+    Lab047FastDragKey := key
+    return pBase
+}
+
+Lab047RenderDragFrame(dragIndex) {
+    global LabEditorDoc
+    if !IsObject(LabEditorDoc)
+        return false
+
+    pBase := Lab047BuildFastDragBase(dragIndex)
+    if !pBase
+        return false
+    pOut := StrategyEditorCopySmallBitmap(pBase)
+    if !pOut
+        return false
+
+    g := Gdip_GraphicsFromImage(pOut)
+    if !g {
+        try Gdip_DisposeImage(pOut)
+        return false
+    }
+
+    try {
+        for item in StrategyEditorCanvasPlacements() {
+            if (item.index != dragIndex)
+                continue
+            Lab047DrawFastMarker(g, item.placement, item.point, true)
+            break
+        }
+    } finally {
+        try Gdip_DeleteGraphics(g)
+    }
+    return Lab047SwapRenderedBitmap(pOut)
+}
+
+Lab047RenderPanFrame() {
+    global LabEditorSourceImage, LabEditorCanvasW, LabEditorCanvasH
+    if (LabEditorSourceImage = "" || !FileExist(LabEditorSourceImage))
+        return false
+
+    pSource := LabMapAcquireRenderBitmap(LabEditorSourceImage, &sourceW, &sourceH)
+    if !pSource || sourceW <= 0 || sourceH <= 0
+        return false
+
+    pOut := Gdip_CreateBitmap(LabEditorCanvasW, LabEditorCanvasH)
+    if !pOut
+        return false
+    g := Gdip_GraphicsFromImage(pOut)
+    if !g {
+        try Gdip_DisposeImage(pOut)
+        return false
+    }
+
+    success := false
+    try {
+        StrategyEditorDrawSource(g, pSource, sourceW, sourceH, true)
+        for item in StrategyEditorCanvasPlacements()
+            Lab047DrawFastMarker(g, item.placement, item.point, false)
+        success := true
+    } finally {
+        try Gdip_DeleteGraphics(g)
+        if !success
+            try Gdip_DisposeImage(pOut)
+    }
+    return success ? Lab047SwapRenderedBitmap(pOut) : false
+}
+
+Lab047ProfileReset(kind) {
+    global Lab047ProfileKind, Lab047ProfileFrames, Lab047ProfileTotalMs
+    global Lab047ProfilePeakMs, Lab047ProfileStarted
+    Lab047ProfileKind := kind
+    Lab047ProfileFrames := 0
+    Lab047ProfileTotalMs := 0
+    Lab047ProfilePeakMs := 0
+    Lab047ProfileStarted := A_TickCount
+}
+
+Lab047ProfileAdd(elapsedMs) {
+    global Lab047ProfileFrames, Lab047ProfileTotalMs, Lab047ProfilePeakMs
+    Lab047ProfileFrames += 1
+    Lab047ProfileTotalMs += elapsedMs
+    Lab047ProfilePeakMs := Max(Lab047ProfilePeakMs, elapsedMs)
+}
+
+Lab047ProfileAppend(kind) {
+    global Lab047ProfileKind, Lab047ProfileFrames, Lab047ProfileTotalMs
+    global Lab047ProfilePeakMs, Lab047ProfileStarted, LabEditorStatus
+
+    if (Lab047ProfileKind != kind || Lab047ProfileFrames < 1)
+        return
+    elapsed := Max(1, A_TickCount - Lab047ProfileStarted)
+    avg := Round(Lab047ProfileTotalMs / Lab047ProfileFrames, 1)
+    fps := Round((Lab047ProfileFrames * 1000.0) / elapsed, 1)
+    suffix := "Perf " kind ": " avg " ms avg • " Lab047ProfilePeakMs " ms peak • ~" fps " FPS"
+
+    if LabEditorControlAlive(LabEditorStatus) {
+        current := ""
+        try current := Trim(LabEditorStatus.Text)
+        try LabEditorStatus.Text := (current != "" ? current "  |  " : "") suffix
+    }
+    Lab047ProfileKind := ""
+}
+
+Lab047ReleaseResources(*) {
+    global Lab047FastBrushes, Lab047FastBorderBrush, Lab047FastSelectedBorderBrush
+    Lab047ReleaseFastDragBase()
+    for key, brush in Lab047FastBrushes {
+        if brush
+            try Gdip_DeleteBrush(brush)
+    }
+    Lab047FastBrushes := Map()
+    if Lab047FastBorderBrush
+        try Gdip_DeleteBrush(Lab047FastBorderBrush)
+    if Lab047FastSelectedBorderBrush
+        try Gdip_DeleteBrush(Lab047FastSelectedBorderBrush)
+    Lab047FastBorderBrush := 0
+    Lab047FastSelectedBorderBrush := 0
 }
 
 Lab047CanvasMouseDown(wParam, lParam, msg, hwnd) {
+    global LabEditorDragPlacement, LabEditorPanActive
     global Lab047DragLastPaint, Lab047DragLastFieldUpdate, Lab047PanLastPaint
+
+    Lab047ReleaseFastDragBase()
     StrategyEditorReleaseFastBase()
     Lab047DragLastPaint := 0
     Lab047DragLastFieldUpdate := 0
     Lab047PanLastPaint := 0
-    return Lab044CanvasMouseDown(wParam, lParam, msg, hwnd)
+
+    result := Lab044CanvasMouseDown(wParam, lParam, msg, hwnd)
+    if IsObject(LabEditorDragPlacement)
+        Lab047ProfileReset("Drag")
+    else if LabEditorPanActive
+        Lab047ProfileReset("Pan")
+    return result
 }
 
 Lab047CanvasMouseMove(wParam, lParam, msg, hwnd) {
@@ -169,6 +424,7 @@ Lab047CanvasMouseMove(wParam, lParam, msg, hwnd) {
 
     if Lab044StrategyRunning() {
         Lab044ReleasePointerCapture(true)
+        Lab047ReleaseFastDragBase()
         return
     }
 
@@ -186,7 +442,6 @@ Lab047CanvasMouseMove(wParam, lParam, msg, hwnd) {
         LabEditorDragPreviewY := logical.y
         now := A_TickCount
 
-        ; Native Edit controls update at 10 Hz; the pointer preview stays much faster.
         if (!Lab047DragLastFieldUpdate || now - Lab047DragLastFieldUpdate >= 100) {
             Lab047DragLastFieldUpdate := now
             if LabEditorControlAlive(LabEditorXCtrl)
@@ -195,11 +450,13 @@ Lab047CanvasMouseMove(wParam, lParam, msg, hwnd) {
                 try LabEditorYCtrl.Text := logical.y
         }
 
-        ; 0.4.6 already caches terrain + every stationary marker during a drag. The old
-        ; 80 ms cap made that optimization feel sluggish; ~30 fps is a better target.
-        if (!Lab047DragLastPaint || now - Lab047DragLastPaint >= 33) {
+        ; The cached interaction base contains no marker text. Target ~40 fps but let
+        ; actual render time naturally determine the achievable cadence.
+        if (!Lab047DragLastPaint || now - Lab047DragLastPaint >= 25) {
             Lab047DragLastPaint := now
-            StrategyEditorRenderBackground(false)
+            started := A_TickCount
+            if Lab047RenderDragFrame(dragIndex)
+                Lab047ProfileAdd(Max(0, A_TickCount - started))
         }
         return 0
     }
@@ -225,36 +482,40 @@ Lab047CanvasMouseMove(wParam, lParam, msg, hwnd) {
     LabEditorViewport.CenterY := LabEditorPanStartCenterY - (dy / Max(1, LabEditorCanvasH)) * visibleH
     LabEditorViewport.ClampCenter()
 
-    ; Pan renders terrain only in the existing compositor, so ~22 fps is inexpensive
-    ; and noticeably smoother than the previous ~12 fps cap.
+    ; Keep tower squares visible while panning. Text is deliberately omitted until
+    ; mouse-up, which is much cheaper than a full-quality composite on every move.
     now := A_TickCount
-    if (!Lab047PanLastPaint || now - Lab047PanLastPaint >= 45) {
+    if (!Lab047PanLastPaint || now - Lab047PanLastPaint >= 33) {
         Lab047PanLastPaint := now
-        StrategyEditorRenderBackground(false)
+        started := A_TickCount
+        if Lab047RenderPanFrame()
+            Lab047ProfileAdd(Max(0, A_TickCount - started))
     }
     return 0
 }
 
 Lab047CanvasMouseUp(wParam, lParam, msg, hwnd) {
+    global LabEditorDragPlacement, LabEditorPanActive
+    kind := IsObject(LabEditorDragPlacement) ? "Drag" : (LabEditorPanActive ? "Pan" : "")
     result := Lab044CanvasMouseUp(wParam, lParam, msg, hwnd)
+    Lab047ReleaseFastDragBase()
     StrategyEditorReleaseFastBase()
+    if (kind != "")
+        Lab047ProfileAppend(kind)
     return result
 }
 
 Lab047CanvasWheel(wParam, lParam, msg, hwnd) {
+    Lab047ReleaseFastDragBase()
     StrategyEditorReleaseFastBase()
     return Lab044CanvasWheel(wParam, lParam, msg, hwnd)
 }
 
-Lab047LayerHookPoll(*) {
-    global Lab047LayerHookHwnd
-    Lab047EnsureLayerHook()
-    if Lab047LayerHookHwnd
-        SetTimer(Lab047LayerHookPoll, 0)
-}
-SetTimer(Lab047LayerHookPoll, 250)
+; Native ComboBox ownership: no polling timer and no extra GUI wakeups.
+OnMessage(0x0111, Lab047Command)
+OnExit(Lab047ReleaseResources)
 
 ; Editor-only housekeeping does not need to wake the GUI thread 10+ times a second.
 ; The dedicated Lab044GameplayUiGuard intentionally stays at 120 ms for click safety.
-try SetTimer(StrategyEditorWorkspaceMonitor, 180)
-try SetTimer(StrategyEditorInteractiveStateGuard, 900)
+try SetTimer(StrategyEditorWorkspaceMonitor, 220)
+try SetTimer(StrategyEditorInteractiveStateGuard, 1200)
