@@ -170,7 +170,7 @@ function Get-ImageKind([string]$Path) {
 }
 
 function Remove-TowerVariants([string]$BasePath) {
-    foreach ($ext in @('.png','.jpg','.jpeg','.bmp','.webp','.download','.tmp.jpg')) {
+    foreach ($ext in @('.png','.jpg','.jpeg','.bmp','.webp')) {
         Remove-Item -LiteralPath ($BasePath + $ext) -Force -ErrorAction SilentlyContinue
     }
 }
