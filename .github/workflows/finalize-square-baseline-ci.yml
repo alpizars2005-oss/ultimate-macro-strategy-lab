@@ -1,0 +1,76 @@
+name: Finalize square baseline CI contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finalize-square-baseline-ci.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Align CI assertions with 0.4.10 square baseline
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_one(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match for {old!r}, found {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_one(
+              '.github/workflows/lab-static-checks.yml',
+              "assert 'return \"Footprints: All\"' in placements",
+              "assert 'return \"Squares: Stable\"' in placements\n          assert 'global LabEditorRingMode := \"off\"' in placements\n          assert 'markerSize := selected ? 22 : 18' in maps\n          assert 'Gdip_FillRectangle' in maps"
+          )
+
+          replace_one(
+              '.github/workflows/lab-runtime-contract.yml',
+              '- name: Enforce Strategy Lab 0.4.9 architecture',
+              '- name: Enforce Strategy Lab 0.4.10 square-baseline architecture'
+          )
+          replace_one(
+              '.github/workflows/lab-runtime-contract.yml',
+              "assert 'Gdip_FillEllipse' in maps and 'Gdip_DrawEllipse' in maps",
+              "assert 'Gdip_FillRectangle' in maps\n          assert 'Gdip_FillEllipse' not in maps and 'Gdip_DrawEllipse' not in maps"
+          )
+          replace_one(
+              '.github/workflows/lab-runtime-contract.yml',
+              "assert 'LabFootprintPlacementCollides' in maps",
+              "assert 'LabFootprintPlacementCollides' not in maps"
+          )
+          replace_one(
+              '.github/workflows/lab-runtime-contract.yml',
+              "assert 'LabFootprintCanvasEllipse' in maps",
+              "assert 'LabFootprintCanvasEllipse' not in maps"
+          )
+          replace_one(
+              '.github/workflows/lab-runtime-contract.yml',
+              "assert 'return \"Footprints: All\"' in placements",
+              "assert 'return \"Squares: Stable\"' in placements\n          assert 'global LabEditorRingMode := \"off\"' in placements\n          assert 'markerSize := selected ? 22 : 18' in maps"
+          )
+
+      - name: Commit aligned contracts
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/lab-static-checks.yml .github/workflows/lab-runtime-contract.yml
+          if git diff --cached --quiet; then
+            echo "No contract changes to commit."
+            exit 0
+          fi
+          git commit -m "ci(lab): validate 0.4.10 square editor baseline"
+          git push origin HEAD:main
