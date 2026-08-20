@@ -319,13 +319,35 @@ function Write-Status {
 
 try {
     $InstallDir = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($InstallDir.Trim()).Trim('"'))
-    $catalogPath = Join-Path $InstallDir 'Resources\StrategyLab\Towers\catalog.ini'
+    $installedCatalogPath = Join-Path $InstallDir 'Resources\StrategyLab\Towers\catalog.ini'
+    $repoCatalogPath = Join-Path $PSScriptRoot 'Resources__StrategyLab__Towers__catalog.ini'
+    $catalogPath = $null
+
+    if (Test-Path -LiteralPath $installedCatalogPath -PathType Leaf) {
+        $catalogPath = $installedCatalogPath
+        Log "catalog INSTALLED -> $catalogPath"
+    } elseif (Test-Path -LiteralPath $repoCatalogPath -PathType Leaf) {
+        $catalogPath = $repoCatalogPath
+        Log "catalog REPO -> $catalogPath"
+    } else {
+        throw "Tower catalog not found. Checked installed path '$installedCatalogPath' and repo path '$repoCatalogPath'."
+    }
+
     $catalog = Read-Ini $catalogPath
+    if ($catalog.Count -le 0) {
+        throw "Tower catalog is empty: $catalogPath"
+    }
+    Log "catalog READY towers=$($catalog.Count)"
 
     if ([string]::IsNullOrWhiteSpace($TowerNames) -or $TowerNames.Trim() -eq '*') {
         $requested = @($catalog.Keys)
+        Log "tower SYNC ALL count=$($requested.Count)"
     } else {
         $requested = @($TowerNames.Split('|') | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+        Log "tower SYNC SELECTED count=$($requested.Count)"
+    }
+    if ($requested.Count -le 0) {
+        throw 'Tower request resolved to zero entries.'
     }
 
     foreach ($requestedName in $requested) {
