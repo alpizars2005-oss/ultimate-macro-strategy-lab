@@ -250,8 +250,32 @@ function Download-Tower([string]$Url,[string]$BasePath) {
             throw 'Downloaded portrait is empty.'
         }
         $kind = Get-ImageKind $tmp
+
+        # Fandom can return WebP through content negotiation even when the MediaWiki
+        # imageinfo URL ends in PNG/JPEG and already contains format=original. If IWR
+        # accepted that response, retry once through curl while explicitly advertising
+        # only the formats supported by the bundled GDI+ path.
+        if ($kind -eq 'webp') {
+            Log ("image WEBP retry -> curl original :: " + $Url)
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            & curl.exe -L --fail --silent --show-error --compressed --connect-timeout 12 --max-time 45 `
+                -A $ua -e "$wikiRoot/" `
+                -H 'Accept: image/png,image/jpeg,image/bmp,*/*;q=0.1' `
+                -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' `
+                -o $tmp $Url
+            if ($LASTEXITCODE -ne 0) {
+                throw "curl.exe original-image retry failed with exit code $LASTEXITCODE"
+            }
+            if (!(Test-Path -LiteralPath $tmp) -or (Get-Item -LiteralPath $tmp).Length -lt 200) {
+                throw 'Original-image retry returned an empty portrait.'
+            }
+            $kind = Get-ImageKind $tmp
+        }
+
         if (!$kind) { throw 'Downloaded response is not an image.' }
-        if ($kind -eq 'webp') { throw 'Fandom returned WebP instead of the original PNG/JPEG.' }
+        if ($kind -eq 'webp') {
+            throw 'Fandom still returned WebP after the explicit original-image retry.'
+        }
 
         try {
             return Optimize-Tower $tmp $BasePath
