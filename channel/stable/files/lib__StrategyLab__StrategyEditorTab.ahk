@@ -13,7 +13,7 @@
 #Include "%A_ScriptDir%\lib\StrategyLab\LabRemoteGate.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabStatsTab.ahk"
 
-; Strategy Lab 0.4.6 single-canvas editor.
+; Strategy Lab 0.4.7 single-canvas editor.
 ; Exact client screenshot + real TDS placement boundaries are painted into one bitmap.
 ; The hotbar is excluded from the editable ROI and post-run calibration can refine the
 ; visual placement center/scale without ever changing the source .strat coordinates.
@@ -118,8 +118,9 @@ StrategyEditorSetCircularRegion(ctrl, size) {
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorInteraction.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\StrategyEditorWorkspace.ahk"
 #Include "%A_ScriptDir%\lib\StrategyLab\LabEditorHotfix044.ahk"
+#Include "%A_ScriptDir%\lib\StrategyLab\LabEditorPerf047.ahk"
 
-OnMessage(0x0201, Lab044CanvasMouseDown)
-OnMessage(0x0200, Lab044CanvasMouseMove)
-OnMessage(0x0202, Lab044CanvasMouseUp)
-OnMessage(0x020A, Lab044CanvasWheel)
+OnMessage(0x0201, Lab047CanvasMouseDown)
+OnMessage(0x0200, Lab047CanvasMouseMove)
+OnMessage(0x0202, Lab047CanvasMouseUp)
+OnMessage(0x020A, Lab047CanvasWheel)
