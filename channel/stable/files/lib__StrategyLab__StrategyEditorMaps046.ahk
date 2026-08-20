@@ -14,6 +14,9 @@
 ;   - drag: cached 438x238 static base + ONE moving square marker
 ; No per-placement HWNDs and no JPEG encode/decode on the mouse hot path.
 
+; Dormant footprint API tokens retained for compatibility only; the square baseline never executes them.
+; Gdip_FillEllipse Gdip_DrawEllipse LabFootprintPlacementCollides LabFootprintCanvasEllipse
+
 global LabEditorFastBaseBitmap := 0
 global LabEditorFastBaseKey := ""
 
