@@ -2,7 +2,7 @@
 #SingleInstance Force
 #Warn All, Off
 
-; Headless runtime contract for the 0.4.6 client-aligned single canvas.
+; Headless runtime contract for the 0.4.10 client-aligned square-marker baseline.
 
 StartStrategy(ctrl, *) {
 }
@@ -106,16 +106,11 @@ for region in LabEditorHitRegions {
 }
 
 LabEditorLayer := "All placements"
-LabEditorRingMode := "all"
-if (StrategyEditorRingButtonText() != "Footprints: All")
-    fail("Footprints All label mismatch")
-LabEditorRingMode := "selected"
-if !StrategyEditorRingModeAllows(1) || StrategyEditorRingModeAllows(2)
-    fail("Footprints selected mode visibility mismatch")
+if (StrategyEditorRingButtonText() != "Squares: Stable")
+    fail("Square baseline toolbar label mismatch")
 LabEditorRingMode := "off"
 if StrategyEditorRingModeAllows(1)
-    fail("Footprints Off still allows a footprint")
-LabEditorRingMode := "all"
+    fail("Square baseline unexpectedly exposes footprint rendering")
 
 small := StrategyEditorFootprintDiameter({slot: 5})
 avg := StrategyEditorFootprintDiameter({slot: 1})
@@ -162,5 +157,5 @@ if (bottom.y < 915 || bottom.y > 920)
 if (LabEditorMarkerCtrls.Length != 0 || LabEditorMarkerByHwnd.Count != 0)
     fail("geometry operations created placement native controls")
 
-FileAppend("PASS: 0.4.6 client ROI, cyan footprints, collisions, layers and hit-testing`n", "*")
+FileAppend("PASS: 0.4.10 square markers, client ROI, preserved footprint math, layers and hit-testing`n", "*")
 ExitApp(0)

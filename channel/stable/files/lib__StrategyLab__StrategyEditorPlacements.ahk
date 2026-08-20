@@ -9,7 +9,7 @@ global LabEditorDragLastStatus := 0
 global LabEditorLayerOptions := ["All placements"]
 global LabEditorListRowMap := []
 global LabEditorLayerChangeBusy := false
-global LabEditorRingMode := "all"
+global LabEditorRingMode := "off"
 
 StrategyEditorBuildLayers() {
     global LabEditorDoc, LabEditorLayerCtrl, LabEditorLayer, LabEditorLayerOptions
@@ -127,22 +127,15 @@ StrategyEditorRingModeAllows(index) {
 }
 
 StrategyEditorRingButtonText() {
-    global LabEditorRingMode
-    if (LabEditorRingMode = "selected")
-        return "Footprints: 1"
-    if (LabEditorRingMode = "off")
-        return "Footprints: Off"
-    return "Footprints: All"
+    return "Squares: Stable"
 }
 
 StrategyEditorToggleRings(*) {
     global LabEditorRingMode, LabEditorRingsBtn
-    LabEditorRingMode := LabEditorRingMode = "all" ? "selected" : (LabEditorRingMode = "selected" ? "off" : "all")
+    LabEditorRingMode := "off"
     if LabEditorControlAlive(LabEditorRingsBtn)
         try LabEditorRingsBtn.Text := StrategyEditorRingButtonText()
-    StrategyEditorRenderBackground()
-    label := LabEditorRingMode = "all" ? "all placement footprints" : (LabEditorRingMode = "selected" ? "selected placement footprint" : "placement footprints hidden")
-    StrategyEditorSetStatus("Canvas guides: " label ". Red means two reserved placement areas intersect.")
+    StrategyEditorSetStatus("Stable square-marker baseline active. Footprint geometry is preserved for a later opt-in pass.")
 }
 
 ; Compatibility name. In 0.4 this does not build Windows controls; it just refreshes
@@ -311,11 +304,7 @@ StrategyEditorApplyCoordinates(*) {
     LabEditorDoc.MovePlacement(placement, LabEditorXCtrl.Text, LabEditorYCtrl.Text)
     StrategyEditorRefreshVisuals()
     StrategyEditorSelectPlacement(LabEditorSelectedRow)
-    collisions := LabFootprintCollisionMap(LabEditorDoc)
-    if collisions.Has(LabEditorSelectedRow)
-        StrategyEditorSetStatus("Updated " placement.towerId " to (" placement.x ", " placement.y "). WARNING: placement footprint intersects another tower.", true)
-    else
-        StrategyEditorSetStatus("Updated " placement.towerId " to (" placement.x ", " placement.y "). Not saved yet.")
+    StrategyEditorSetStatus("Updated " placement.towerId " to (" placement.x ", " placement.y "). Not saved yet.")
     StrategyEditorRefreshButtons()
     StrategyEditorRefreshDirty()
 }
@@ -427,9 +416,7 @@ StrategyEditorMouseMove(wParam, lParam, msg, hwnd) {
             try LabEditorXCtrl.Text := LabEditorDragPreviewX
         if LabEditorControlAlive(LabEditorYCtrl)
             try LabEditorYCtrl.Text := LabEditorDragPreviewY
-        collisions := LabFootprintCollisionMap(LabEditorDoc)
-        StrategyEditorSetStatus("Preview " LabEditorDragPlacement.towerId " → (" LabEditorDragPreviewX ", " LabEditorDragPreviewY ")"
-            (collisions.Has(LabEditorDragIndex) ? " • footprint collision" : ""), collisions.Has(LabEditorDragIndex))
+        StrategyEditorSetStatus("Preview " LabEditorDragPlacement.towerId " → (" LabEditorDragPreviewX ", " LabEditorDragPreviewY ")")
     }
 
     StrategyEditorRenderBackground(false)
@@ -463,13 +450,8 @@ StrategyEditorMouseUp(wParam, lParam, msg, hwnd) {
 
     StrategyEditorRefreshVisuals()
     StrategyEditorSelectPlacement(row)
-    if changed {
-        collisions := LabFootprintCollisionMap(LabEditorDoc)
-        if collisions.Has(row)
-            StrategyEditorSetStatus("Moved " placement.towerId " to (" placement.x ", " placement.y "). WARNING: placement footprint intersects another tower.", true)
-        else
-            StrategyEditorSetStatus("Moved " placement.towerId " to (" placement.x ", " placement.y "). Not saved yet.")
-    }
+    if changed
+        StrategyEditorSetStatus("Moved " placement.towerId " to (" placement.x ", " placement.y "). Not saved yet.")
     StrategyEditorRefreshButtons()
     StrategyEditorRefreshDirty()
     return 0
