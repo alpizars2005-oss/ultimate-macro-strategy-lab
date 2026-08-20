@@ -11,7 +11,7 @@
 ; Performance truth:
 ;   - idle: one full composite
 ;   - pan: background only until mouse-up
-;   - drag: cached 438x238 static base + ONE moving footprint
+;   - drag: cached 438x238 static base + ONE moving square marker
 ; No per-placement HWNDs and no JPEG encode/decode on the mouse hot path.
 
 global LabEditorFastBaseBitmap := 0
@@ -246,60 +246,33 @@ StrategyEditorRebuildHitRegions(items) {
 }
 
 StrategyEditorDrawPlacement(graphics, index, placement, point, collisions, fast := false) {
-    global LabEditorSelectedRow, LabEditorDoc, LabEditorViewport, LabEditorCanvasW, LabEditorCanvasH
-
+    global LabEditorSelectedRow
     selected := index = LabEditorSelectedRow
-    colliding := IsObject(collisions) && collisions.Has(index)
-    ellipse := LabFootprintCanvasEllipse(placement, LabEditorDoc, LabEditorViewport,
-        LabEditorCanvasW, LabEditorCanvasH)
-    footprintW := Max(2.0, ellipse.w)
-    footprintH := Max(2.0, ellipse.h)
-    halfW := footprintW / 2.0
-    halfH := footprintH / 2.0
+    markerSize := selected ? 22 : 18
+    half := markerSize / 2.0
+    border := selected ? 2 : 1
 
-    if StrategyEditorRingModeAllows(index) {
-        ; Cyan deliberately mirrors TDS' placed-tower boundary. Red means the reserved
-        ; placement spaces intersect according to the same logical footprint model.
-        ringColor := colliding ? (selected ? 0xFFFF5A5A : 0xEAFF4545)
-            : (selected ? 0xFF48E8FF : 0xDC20CFF2)
-        fillColor := colliding ? 0x28FF3131 : (selected ? 0x2415D9F4 : 0x1015D9F4)
-        pen := 0
-        brush := 0
-        try {
-            brush := Gdip_BrushCreateSolid(fillColor)
-            if brush
-                Gdip_FillEllipse(graphics, brush, point.x - halfW, point.y - halfH, footprintW, footprintH)
-            pen := Gdip_CreatePen(ringColor, selected ? 1.8 : 1.15)
-            if pen
-                Gdip_DrawEllipse(graphics, pen, point.x - halfW, point.y - halfH, footprintW, footprintH)
-        } finally {
-            if pen
-                try Gdip_DeletePen(pen)
-            if brush
-                try Gdip_DeleteBrush(brush)
-        }
-    }
-
-    markerDiameter := LabFootprintMarkerDiameter(selected)
-    markerRadius := markerDiameter / 2.0
-    markerBrush := 0
+    borderBrush := 0
+    fillBrush := 0
     try {
-        markerBrush := Gdip_BrushCreateSolid(colliding ? 0xFFFF4040 : (selected ? 0xFFFFFFFF : StrategyEditorSlotColor(placement.slot, 255)))
-        if markerBrush
-            Gdip_FillEllipse(graphics, markerBrush, point.x - markerRadius, point.y - markerRadius,
-                markerDiameter, markerDiameter)
+        borderBrush := Gdip_BrushCreateSolid(selected ? 0xFFFFFFFF : 0xFF20252B)
+        if borderBrush
+            Gdip_FillRectangle(graphics, borderBrush, point.x - half, point.y - half, markerSize, markerSize)
+        fillBrush := Gdip_BrushCreateSolid(StrategyEditorSlotColor(placement.slot, 255))
+        if fillBrush
+            Gdip_FillRectangle(graphics, fillBrush, point.x - half + border, point.y - half + border,
+                markerSize - (border * 2), markerSize - (border * 2))
     } finally {
-        if markerBrush
-            try Gdip_DeleteBrush(markerBrush)
+        if fillBrush
+            try Gdip_DeleteBrush(fillBrush)
+        if borderBrush
+            try Gdip_DeleteBrush(borderBrush)
     }
 
-    if !fast {
-        label := StrategyEditorMarkerLabel(placement)
-        labelW := Max(16, StrLen(label) * 7)
-        options := "x" (point.x + LabFootprintLabelOffset(selected)) " y" (point.y - 8)
-            . " w" labelW " h16 vCenter cFFFFFFFF s7 " (selected ? "Bold" : "")
-        try Gdip_TextToGraphics(graphics, label, options, "Segoe UI")
-    }
+    label := StrategyEditorMarkerLabel(placement)
+    options := "x" (point.x - half) " y" (point.y - half)
+        . " w" markerSize " h" markerSize " Center vCenter cFFFFFFFF s7 Bold"
+    try Gdip_TextToGraphics(graphics, label, options, "Segoe UI")
 }
 
 StrategyEditorDrawSource(graphics, pSource, sourceW, sourceH, fast := false) {
@@ -383,7 +356,7 @@ StrategyEditorBuildCompositeBitmap() {
     if !pSource || sourceW <= 0 || sourceH <= 0
         return 0
 
-    ; Panning needs only the terrain. Footprints return on the guaranteed final mouse-up
+    ; Panning needs only the terrain. Square markers return on the guaranteed final mouse-up
     ; repaint, which turns dozens of ellipse/text operations into one DrawImage call.
     if LabEditorPanActive {
         pPan := Gdip_CreateBitmap(LabEditorCanvasW, LabEditorCanvasH)
@@ -421,8 +394,6 @@ StrategyEditorBuildCompositeBitmap() {
                 if (item.index != dragIndex)
                     continue
                 collision := Map()
-                if LabFootprintPlacementCollides(dragIndex, LabEditorDoc)
-                    collision[dragIndex] := true
                 StrategyEditorDrawPlacement(g, dragIndex, item.placement, item.point, collision, true)
                 break
             }
@@ -446,7 +417,7 @@ StrategyEditorBuildCompositeBitmap() {
         StrategyEditorDrawSource(graphics, pSource, sourceW, sourceH, false)
         items := StrategyEditorCanvasPlacements()
         StrategyEditorRebuildHitRegions(items)
-        collisions := IsObject(LabEditorDoc) ? LabFootprintCollisionMap(LabEditorDoc) : Map()
+        collisions := Map()
         for item in items
             StrategyEditorDrawPlacement(graphics, item.index, item.placement, item.point, collisions, false)
         success := true

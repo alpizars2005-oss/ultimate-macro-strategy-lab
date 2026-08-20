@@ -1,0 +1,35 @@
+name: Publish Strategy Lab square baseline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-square-baseline.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate stable 0.4.10 square baseline
+        shell: pwsh
+        run: .\tools\publish_square_baseline.ps1
+
+      - name: Commit generated stable payload
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add channel/stable tests/editor_canvas_runtime_test.ahk
+          if (git diff --cached --quiet) {
+            Write-Host "No generated changes to commit."
+            exit 0
+          }
+          git commit -m "release(lab): 0.4.10 stable square editor baseline"
+          git push origin HEAD:main

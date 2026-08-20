@@ -16,7 +16,7 @@ StrategyEditorCreateTab(gui) {
     gui.SetFont("s11 w700 c4CA3FF", "Segoe UI")
     LabEditorTitle := gui.Add("Text", "x20 y94 w300 h24 Hidden", "Visual Strategy Editor")
     gui.SetFont("s7 w400 c8E8E8E", "Segoe UI")
-    LabEditorSubtitle := gui.Add("Text", "x20 y116 w520 h18 Hidden", "Exact map screenshot • true placement footprints • safe saves")
+    LabEditorSubtitle := gui.Add("Text", "x20 y116 w520 h18 Hidden", "Exact map screenshot • stable square markers • safe saves")
     LabEditorAssetBadge := gui.Add("Text", "x470 y103 w200 h18 Hidden Right c8E8E8E", "Map source: waiting for strategy")
     LabEditorHeaderLine := gui.Add("Progress", "x20 y137 w650 h1 Hidden Background333333", 0)
 
@@ -44,7 +44,7 @@ StrategyEditorCreateTab(gui) {
     LabEditorPanDownBtn := gui.Add("Button", "x-1000 y-1000 w1 h1 Hidden", "↓")
     LabEditorPanRightBtn := gui.Add("Button", "x-1000 y-1000 w1 h1 Hidden", "→")
     LabEditorSyncBtn := gui.Add("Button", "x298 y177 w104 h24 Hidden", "Sync Portraits")
-    LabEditorRingsBtn := gui.Add("Button", "x412 y177 w92 h24 Hidden", "Footprints: All")
+    LabEditorRingsBtn := gui.Add("Button", "x412 y177 w92 h24 Hidden Disabled", "Squares: Stable")
     LabEditorRemoteBtn := gui.Add("Button", "x532 y177 w64 h24 Hidden", "Remote")
     gui.SetFont("s7 w500 cA8A8A8", "Segoe UI")
     LabEditorMapLabel := gui.Add("Text", "x600 y181 w70 h18 Hidden Right", "Map: -")
@@ -66,7 +66,7 @@ StrategyEditorCreateTab(gui) {
     gui.SetFont("s10 w700 cF2F2F2", "Segoe UI")
     LabEditorTowerName := gui.Add("Text", "x554 y218 w106 h38 Hidden Background171717", "Select a placement")
     gui.SetFont("s7 w400 c9C9C9C", "Segoe UI")
-    LabEditorTowerMeta := gui.Add("Text", "x554 y258 w106 h42 Hidden Background171717", "Click a footprint or row")
+    LabEditorTowerMeta := gui.Add("Text", "x554 y258 w106 h42 Hidden Background171717", "Click a marker or row")
 
     gui.SetFont("s8 w400 cEAEAEA", "Segoe UI")
     LabEditorList := gui.Add("ListView", "x480 y306 w180 h127 Hidden Grid -Multi Background202020 cEAEAEA", ["#", "Unit", "X", "Y"])
@@ -138,6 +138,7 @@ StrategyEditorShow() {
     }
     if LabEditorControlAlive(LabEditorRingsBtn)
         try LabEditorRingsBtn.Text := StrategyEditorRingButtonText()
+        try LabEditorRingsBtn.Enabled := false
 
     if LabEditorExpanded {
         for ctrl in [LabEditorInfoPanel, LabEditorTowerPortrait, LabEditorTowerName, LabEditorTowerMeta, LabEditorList,

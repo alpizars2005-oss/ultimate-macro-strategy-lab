@@ -1,4 +1,4 @@
-# Strategy Lab stable delivery map 0.4.6 client-aligned footprint calibration
+# Strategy Lab stable delivery map 0.4.10 square-marker baseline
 # target|source|mode
 LAB_README.md|channel/stable/files/LAB_README.md|raw
 run_lab.bat|channel/stable/files/run_lab.bat|raw
