@@ -138,20 +138,49 @@ function Get-ImageOriginalUrl([string]$FileTitle) {
     return $null
 }
 
-function Choose-DefaultTowerImage([string]$TowerName,[string[]]$Titles) {
-    $norm = ($TowerName -replace '[^A-Za-z0-9]','').ToLowerInvariant()
+function Choose-PreferredTowerImage([string]$TowerName,[string[]]$Titles) {
+    $normTower = ($TowerName -replace '[^A-Za-z0-9]','').ToLowerInvariant()
     $ranked = foreach ($title in $Titles) {
         $name = $title -replace '^File:',''
         $flat = ($name -replace '[^A-Za-z0-9]','').ToLowerInvariant()
         $score = 0
-        if ($flat.Contains($norm)) { $score += 45 }
-        if ($name -match '(?i)default') { $score += 85 }
-        if ($name -match '(?i)icon|render|portrait|static|dynamic') { $score += 25 }
-        if ($name -match '(?i)golden|skin|crate|weapon|sound|ogg|gif|face|concept|upgrade|level[1-9]') { $score -= 95 }
-        [PSCustomObject]@{Title=$title; Score=$score}
+
+        # Primary contract discovered from the current in-game gallery assets:
+        # prefer the no-skin default icon exported from the game (Default + IconIG).
+        if ($name -match '(?i)default' -and $name -match '(?i)iconig') { $score += 600 }
+        elseif ($name -match '(?i)default') { $score += 150 }
+
+        # Prefer lossless source assets when several candidates share the same family.
+        if ($name -match '(?i)\.png$') { $score += 45 }
+        elseif ($name -match '(?i)\.jpe?g$') { $score += 20 }
+        elseif ($name -match '(?i)\.bmp$') { $score += 5 }
+
+        # Useful fallbacks when a tower has no IconIG asset.
+        if ($name -match '(?i)render|portrait|static|dynamic') { $score += 70 }
+        if ($flat.Contains($normTower)) { $score += 35 }
+
+        # Strongly reject old/skin/unrelated assets even when they contain "Default".
+        if ($name -match '(?i)old|legacy|classic|unused|outdated|deprecated|beta') { $score -= 350 }
+        if ($name -match '(?i)golden|skin|crate|halloween|christmas|valentine|toy|plushie|neko|vigilante|slayer|bunny|ducky|pirate|galactic|prime|mage') { $score -= 260 }
+        if ($name -match '(?i)weapon|gun|sound|voice|theme|ost|ogg|gif|emoji|badge|banner|face|concept|upgrade|level[1-9]') { $score -= 220 }
+
+        [PSCustomObject]@{Title=$title; Name=$name; Score=$score}
     }
-    $best = $ranked | Sort-Object Score -Descending | Select-Object -First 1
-    if ($best -and $best.Score -ge 90) { return [string]$best.Title }
+
+    $bestIconIG = $ranked |
+        Where-Object { $_.Name -match '(?i)default' -and $_.Name -match '(?i)iconig' -and $_.Score -gt 0 } |
+        Sort-Object Score -Descending |
+        Select-Object -First 1
+    if ($bestIconIG) { return [string]$bestIconIG.Title }
+
+    $bestDefault = $ranked |
+        Where-Object { $_.Name -match '(?i)default' -and $_.Score -ge 100 } |
+        Sort-Object Score -Descending |
+        Select-Object -First 1
+    if ($bestDefault) { return [string]$bestDefault.Title }
+
+    $bestAny = $ranked | Sort-Object Score -Descending | Select-Object -First 1
+    if ($bestAny -and $bestAny.Score -ge 70) { return [string]$bestAny.Title }
     return $null
 }
 
@@ -175,19 +204,8 @@ function Remove-TowerVariants([string]$BasePath) {
     }
 }
 
-function Save-Jpeg([System.Drawing.Bitmap]$Bitmap,[string]$Path,[int]$Quality) {
-    $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
-        Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
-    if (!$codec) { throw 'JPEG encoder is unavailable.' }
-    $parameters = [System.Drawing.Imaging.EncoderParameters]::new(1)
-    $parameters.Param[0] = [System.Drawing.Imaging.EncoderParameter]::new(
-        [System.Drawing.Imaging.Encoder]::Quality, [long]$Quality
-    )
-    try {
-        $Bitmap.Save($Path, $codec, $parameters)
-    } finally {
-        $parameters.Dispose()
-    }
+function Save-Png([System.Drawing.Bitmap]$Bitmap,[string]$Path) {
+    $Bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
 }
 
 function Optimize-Tower([string]$InputPath,[string]$BasePath) {
@@ -195,9 +213,10 @@ function Optimize-Tower([string]$InputPath,[string]$BasePath) {
     $image = [System.Drawing.Image]::FromFile($InputPath)
     $bitmap = $null
     $graphics = $null
+    $temp = $BasePath + '.tmp.png'
     try {
         $canvas = 256
-        $padding = 14
+        $padding = 10
         $usable = $canvas - (2 * $padding)
         $scale = [Math]::Min($usable / [double]$image.Width, $usable / [double]$image.Height)
         $drawW = [Math]::Max(1, [int][Math]::Round($image.Width * $scale))
@@ -207,19 +226,18 @@ function Optimize-Tower([string]$InputPath,[string]$BasePath) {
 
         $bitmap = [System.Drawing.Bitmap]::new($canvas, $canvas)
         $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-        $graphics.Clear([System.Drawing.Color]::FromArgb(21,25,31))
+        $graphics.Clear([System.Drawing.Color]::Transparent)
         $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
         $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
         $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
         $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
         $graphics.DrawImage($image, $drawX, $drawY, $drawW, $drawH)
 
-        $target = $BasePath + '.jpg'
-        $temp = $BasePath + '.tmp.jpg'
+        $target = $BasePath + '.png'
         Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
-        Save-Jpeg $bitmap $temp 84
-        if (!(Test-Path -LiteralPath $temp) -or (Get-Item -LiteralPath $temp).Length -lt 800) {
-            throw 'Optimized portrait was not written correctly.'
+        Save-Png $bitmap $temp
+        if (!(Test-Path -LiteralPath $temp) -or (Get-Item -LiteralPath $temp).Length -lt 200) {
+            throw 'Optimized PNG portrait was not written correctly.'
         }
         Remove-TowerVariants $BasePath
         Move-Item -LiteralPath $temp -Destination $target -Force
@@ -229,6 +247,7 @@ function Optimize-Tower([string]$InputPath,[string]$BasePath) {
         if ($graphics) { $graphics.Dispose() }
         if ($bitmap) { $bitmap.Dispose() }
         if ($image) { $image.Dispose() }
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -302,7 +321,12 @@ try {
     $InstallDir = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($InstallDir.Trim()).Trim('"'))
     $catalogPath = Join-Path $InstallDir 'Resources\StrategyLab\Towers\catalog.ini'
     $catalog = Read-Ini $catalogPath
-    $requested = @($TowerNames.Split('|') | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+
+    if ([string]::IsNullOrWhiteSpace($TowerNames) -or $TowerNames.Trim() -eq '*') {
+        $requested = @($catalog.Keys)
+    } else {
+        $requested = @($TowerNames.Split('|') | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    }
 
     foreach ($requestedName in $requested) {
         $section = $null
@@ -322,9 +346,9 @@ try {
         $key = Safe-Key $section
         $base = Join-Path $towerDir $key
 
-        # A valid local portrait is immutable until the user explicitly Syncs again.
+        # A valid local portrait is immutable until the user explicitly clears/re-syncs it.
         $existing = $null
-        foreach ($ext in @('.jpg','.jpeg','.png','.bmp')) {
+        foreach ($ext in @('.png','.jpg','.jpeg','.bmp')) {
             $candidate = $base + $ext
             if (Test-Path -LiteralPath $candidate -PathType Leaf) { $existing = $candidate; break }
         }
@@ -337,10 +361,13 @@ try {
         try {
             $url = $null
             $galleryTitles = @(Get-PageImages ($page + '/Gallery'))
-            $defaultFile = Choose-DefaultTowerImage $display $galleryTitles
-            if ($defaultFile) {
-                $url = Get-ImageOriginalUrl $defaultFile
-                if ($url) { Log "tower DEFAULT $display [$defaultFile]" }
+            $preferredFile = Choose-PreferredTowerImage $display $galleryTitles
+            if ($preferredFile) {
+                $url = Get-ImageOriginalUrl $preferredFile
+                if ($url) {
+                    $label = if (($preferredFile -match '(?i)default') -and ($preferredFile -match '(?i)iconig')) { 'ICONIG' } else { 'PREFERRED' }
+                    Log "tower $label $display [$preferredFile]"
+                }
             }
             if (!$url) {
                 $primary = Get-PagePrimaryFile $page
