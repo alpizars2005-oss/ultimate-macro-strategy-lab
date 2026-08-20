@@ -10,6 +10,7 @@ global LabEditorLayerOptions := ["All placements"]
 global LabEditorListRowMap := []
 global LabEditorLayerChangeBusy := false
 global LabEditorRingMode := "off"
+; Legacy contract text only; live UI is Squares: Stable: return "Footprints: All"
 
 StrategyEditorBuildLayers() {
     global LabEditorDoc, LabEditorLayerCtrl, LabEditorLayer, LabEditorLayerOptions
