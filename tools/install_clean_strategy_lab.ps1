@@ -79,6 +79,8 @@ function Install-StableFiles([string]$Root) {
     $versionText = Get-Content -LiteralPath $versionPath -Raw
     if ($versionText -notmatch '(?im)^Version\s*=\s*([^\r\n]+)') { throw 'Invalid stable version.ini.' }
     $version = $Matches[1].Trim()
+    $installed = 0
+    $unchanged = 0
 
     foreach ($raw in Get-Content -LiteralPath $manifest) {
         $line = $raw.Trim()
@@ -97,6 +99,21 @@ function Install-StableFiles([string]$Root) {
         $sourcePath = Join-Path $cacheRepo $source
         if (!(Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw "Missing stable source: $source" }
         $targetPath = Join-Path $Root $target
+
+        # Reinstalling Strategy Lab is common during development. Avoid rewriting a file
+        # when the installed bytes already match the signed manifest entry. Besides being
+        # faster, this reduces filesystem churn while iterating on the editor.
+        if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+            try {
+                if ((Sha256 $targetPath) -eq $expected) {
+                    $unchanged++
+                    continue
+                }
+            } catch {
+                # Fall through to the normal verified replacement path.
+            }
+        }
+
         $parent = Split-Path -Parent $targetPath
         if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
         $tmp = Join-Path $env:TEMP ('strategy-lab-clean-' + [guid]::NewGuid().ToString('N'))
@@ -112,10 +129,12 @@ function Install-StableFiles([string]$Root) {
             $actual = Sha256 $tmp
             if ($actual -ne $expected) { throw "SHA-256 mismatch for $target" }
             Move-Item -LiteralPath $tmp -Destination $targetPath -Force
+            $installed++
         } finally {
             Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
         }
     }
+    Log ("FILES installed={0} unchanged={1}" -f $installed,$unchanged)
     return $version
 }
 
@@ -123,6 +142,66 @@ function Replace-ExactlyOnce([string]$Text,[string]$Old,[string]$New,[string]$La
     $count = ([regex]::Matches($Text,[regex]::Escape($Old))).Count
     if ($count -ne 1) { throw "${Label}: expected exactly one baseline anchor, found $count." }
     return $Text.Replace($Old,$New)
+}
+
+function Patch-TabDeclaration([string]$Text) {
+    $pattern = '(?m)^(?<indent>[ \t]*)tabNames\s*:=\s*\[(?<body>[^\r\n]*)\][ \t]*$'
+    $matches = [regex]::Matches($Text,$pattern)
+    if ($matches.Count -ne 1) {
+        throw "Could not identify one unambiguous tabNames declaration (found $($matches.Count))."
+    }
+
+    $match = $matches[0]
+    $labels = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($labelMatch in [regex]::Matches($match.Groups['body'].Value,'"([^"]+)"')) {
+        [void]$labels.Add($labelMatch.Groups[1].Value)
+    }
+    if ($labels.Count -lt 2) { throw 'tabNames declaration did not contain enough labels.' }
+
+    $creditsZero = -1
+    $editorZero = -1
+    $statsZero = -1
+    for ($i = 0; $i -lt $labels.Count; $i++) {
+        if ([string]::Equals($labels[$i],'Credits',[StringComparison]::OrdinalIgnoreCase)) { $creditsZero = $i }
+        if ([string]::Equals($labels[$i],'Editor',[StringComparison]::OrdinalIgnoreCase)) { $editorZero = $i }
+        if ([string]::Equals($labels[$i],'Stats',[StringComparison]::OrdinalIgnoreCase)) { $statsZero = $i }
+    }
+    if ($creditsZero -lt 0) { throw 'Could not locate Credits in tabNames.' }
+    if (($editorZero -ge 0) -xor ($statsZero -ge 0)) {
+        throw 'Only one Strategy Lab tab is present in tabNames; refusing an ambiguous partial patch.'
+    }
+
+    if ($editorZero -ge 0 -and $statsZero -ge 0) {
+        if ($editorZero + 1 -ne $statsZero -or $statsZero + 1 -ne $creditsZero) {
+            throw 'Existing Editor/Stats tabs are not immediately before Credits.'
+        }
+        return [PSCustomObject]@{
+            Text = $Text
+            OldCreditsIndex = $creditsZero - 1
+            EditorIndex = $editorZero + 1
+            StatsIndex = $statsZero + 1
+            CreditsIndex = $creditsZero + 1
+            TabCount = $labels.Count
+            AlreadyPatched = $true
+        }
+    }
+
+    $oldCreditsIndex = $creditsZero + 1
+    $labels.Insert($creditsZero,'Editor')
+    $labels.Insert($creditsZero + 1,'Stats')
+    $quoted = foreach ($label in $labels) { '"' + $label + '"' }
+    $newLine = $match.Groups['indent'].Value + 'tabNames := [' + ($quoted -join ', ') + ']'
+    $patched = $Text.Substring(0,$match.Index) + $newLine + $Text.Substring($match.Index + $match.Length)
+
+    return [PSCustomObject]@{
+        Text = $patched
+        OldCreditsIndex = $oldCreditsIndex
+        EditorIndex = $oldCreditsIndex
+        StatsIndex = $oldCreditsIndex + 1
+        CreditsIndex = $oldCreditsIndex + 2
+        TabCount = $labels.Count
+        AlreadyPatched = $false
+    }
 }
 
 function Patch-MainLab([string]$MainPath,[string]$Version) {
@@ -139,13 +218,17 @@ function Patch-MainLab([string]$MainPath,[string]$Version) {
         $text = Replace-ExactlyOnce $text $includeAnchor $includeBlock 'Strategy Lab include injection'
     }
 
-    $oldTabs = 'tabNames := ["Main", "Record", "(Beta) Party", "Webhook", "Settings", "Tools", "Credits"]'
-    if ($text.Contains($oldTabs)) {
-        $text = $text.Replace($oldTabs,'tabNames := ["Main", "Record", "Party", "Webhook", "Settings", "Tools", "Editor", "Stats", "Credits"]')
-    } elseif (!$text.Contains('"Editor", "Stats", "Credits"')) {
-        throw 'Could not identify the baseline tabNames declaration.'
-    }
+    # Upstream 1.3.3 changed tab labels. Parse the actual array instead of pinning the
+    # installer to one exact historical string; preserve every upstream label verbatim
+    # and insert Strategy Lab immediately before Credits.
+    $tabPatch = Patch-TabDeclaration $text
+    $text = $tabPatch.Text
+    Log ("TABS count={0} editor=Tab{1} stats=Tab{2} credits=Tab{3}" -f
+        $tabPatch.TabCount,$tabPatch.EditorIndex,$tabPatch.StatsIndex,$tabPatch.CreditsIndex)
 
+    # The current upstream GUI is 700 px wide. Nine tabs fit comfortably with this compact
+    # geometry. These replacements are intentionally no-ops when an already-patched file
+    # is reprocessed.
     $text = $text.Replace('xTab := 20 + (i-1) * 90','xTab := 10 + (i-1) * 76')
     $text = $text.Replace('"x" xTab " y43 w80 h34 Hidden Background222222 Disabled"','"x" xTab " y43 w72 h34 Hidden Background222222 Disabled"')
     $text = $text.Replace('"x" xTab " y52 w80 h22 Center BackgroundTrans"','"x" xTab " y52 w72 h22 Center BackgroundTrans"')
@@ -163,18 +246,19 @@ function Patch-MainLab([string]$MainPath,[string]$Version) {
         $text = Replace-ExactlyOnce $text $anchor $block 'Strategy Lab tab-control injection'
     }
 
-    $creditsPattern = '(?ms)\} else if \(tab = "Tab7"\) \{\r?\n(?<body>\s*Credit_Content\.Visible := true.*?\s*Credit_InfoBG\.Visible := true\r?\n)\s*\}'
-    $creditsMatches = [regex]::Matches($text,$creditsPattern)
-    if ($creditsMatches.Count -eq 1) {
+    if (!$text.Contains('StrategyEditorShow()') -or !$text.Contains('LabStatsShow()')) {
+        $creditsPattern = '(?ms)\}\s*else if\s*\(tab\s*=\s*"Tab' + $tabPatch.OldCreditsIndex + '"\)\s*\{\r?\n(?<body>\s*Credit_Content\.Visible\s*:=\s*true.*?\s*Credit_InfoBG\.Visible\s*:=\s*true\r?\n)\s*\}'
+        $creditsMatches = [regex]::Matches($text,$creditsPattern)
+        if ($creditsMatches.Count -ne 1) {
+            throw "ShowTabContent integration anchor is ambiguous (found $($creditsMatches.Count) baseline Credits blocks for Tab$($tabPatch.OldCreditsIndex))."
+        }
         $body = $creditsMatches[0].Groups['body'].Value
-        $replacement = '} else if (tab = "Tab7") {' + "`r`n" +
+        $replacement = '} else if (tab = "Tab' + $tabPatch.EditorIndex + '") {' + "`r`n" +
             '        StrategyEditorShow()' + "`r`n" +
-            '    } else if (tab = "Tab8") {' + "`r`n" +
+            '    } else if (tab = "Tab' + $tabPatch.StatsIndex + '") {' + "`r`n" +
             '        LabStatsShow()' + "`r`n" +
-            '    } else if (tab = "Tab9") {' + "`r`n" + $body + '    }'
+            '    } else if (tab = "Tab' + $tabPatch.CreditsIndex + '") {' + "`r`n" + $body + '    }'
         $text = $text.Substring(0,$creditsMatches[0].Index) + $replacement + $text.Substring($creditsMatches[0].Index + $creditsMatches[0].Length)
-    } elseif (!$text.Contains('StrategyEditorShow()') -or !$text.Contains('LabStatsShow()')) {
-        throw "ShowTabContent integration anchor is ambiguous (found $($creditsMatches.Count) baseline Credits blocks)."
     }
 
     if (!$text.Contains('; <StrategyLabUpdaterStartup>')) {
